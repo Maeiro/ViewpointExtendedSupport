@@ -2,7 +2,7 @@
 
 Optional compatibility bridge for Viewpoint on Project Zomboid Build 42.
 
-The mod uses ZombieBuddy's ByteBuddy runtime patching API and does not modify the Viewpoint JAR. It adds configurable key binds, vehicle camera switching, third-person camera zoom with the mouse wheel, hold-to-use free mouse mode, UI cursor activation, Ergonomic UI integration, and cursor/reticle visibility that follows the actual free-cursor state.
+The mod uses ZombieBuddy's ByteBuddy runtime patching API and does not modify the Viewpoint JAR. It adds configurable key binds, vehicle camera switching, third-person camera zoom with the mouse wheel, hold-to-use free mouse mode, UI cursor activation, Ergonomic UI integration, and cursor/reticle visibility that follows the actual free-cursor state. In Viewpoint aiming mode it keeps the small aim point, hides the isometric reticle layers, and follows the game's configured target color for valid firearm targets.
 
 Dependencies:
 

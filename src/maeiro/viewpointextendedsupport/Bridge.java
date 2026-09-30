@@ -1,5 +1,6 @@
 package maeiro.viewpointextendedsupport;
 
+import java.lang.reflect.Constructor;
 import java.lang.reflect.Field;
 import java.lang.reflect.Method;
 
@@ -52,6 +53,21 @@ public final class Bridge {
     private static volatile Method getDisplayWindow;
     private static volatile Method glfwSetInputMode;
     private static volatile Method glfwGetInputMode;
+    private static volatile Method getCoreInstance;
+    private static volatile Method getOptionShowReticleTexture;
+    private static volatile Method setOptionShowReticleTexture;
+    private static volatile Method getOptionShowValidTargetReticleTexture;
+    private static volatile Method setOptionShowValidTargetReticleTexture;
+    private static volatile Method getOptionCrosshairTextureIndex;
+    private static volatile Method setOptionCrosshairTextureIndex;
+    private static volatile Method getNoTargetColor;
+    private static volatile Method getPlayerIndex;
+    private static volatile Method getAimingMode;
+    private static volatile Method getIsoReticleInstance;
+    private static volatile Method setAimColor;
+    private static volatile Field aimingModeHasTarget;
+    private static volatile Constructor<?> colorInfoConstructor;
+    private static volatile Object validTargetAimColor;
 
     private static volatile long vanillaCursorHookCalls;
     private static volatile long viewpointCursorHookCalls;
@@ -70,6 +86,11 @@ public final class Bridge {
     private static volatile boolean diagnosticAutoCursor;
     private static volatile boolean diagnosticThirdPerson;
     private static volatile boolean diagnosticVehicle;
+    private static volatile boolean reticleOptionsCaptured;
+    private static volatile boolean savedShowReticleTexture;
+    private static volatile boolean savedShowValidTargetReticleTexture;
+    private static volatile int savedCrosshairTextureIndex;
+    private static volatile boolean reticleErrorLogged;
 
     private Bridge() {
     }
@@ -183,6 +204,9 @@ public final class Bridge {
 
     public static void setViewEnabled(boolean enabled) {
         setBoolean(viewEnabled, "viewpoint.core.View", "enabled", enabled);
+        if (!enabled) {
+            restoreReticlePresentation();
+        }
     }
 
     public static boolean isFreeCursor() {
@@ -219,18 +243,63 @@ public final class Bridge {
 
     public static boolean shouldSkipVanillaReticle(boolean original) {
         recordHook(4, "Hooks.skipIsoReticle", original);
-        if (!isViewEnabled()) {
-            return original;
-        }
-        return isFreeCursor() || isThirdPersonVehicle();
+        return shouldSkipReticle(original);
     }
 
     public static boolean shouldSkipViewpointReticle(boolean original) {
         recordHook(5, "Patch_IsoReticle.enter", original);
-        if (!isViewEnabled()) {
-            return original;
+        return shouldSkipReticle(original);
+    }
+
+    public static void updateViewpointAimColor(Object player) {
+        if (!isViewEnabled() || isFreeCursor() || isThirdPersonVehicle() || player == null) {
+            return;
         }
-        return isFreeCursor() || isThirdPersonVehicle();
+
+        try {
+            if (getPlayerIndex == null) {
+                getPlayerIndex = player.getClass().getMethod("getIndex");
+                getPlayerIndex.setAccessible(true);
+            }
+            if (getAimingMode == null) {
+                getAimingMode = player.getClass().getMethod("getAimingMode");
+                getAimingMode.setAccessible(true);
+            }
+
+            Object aimingMode = getAimingMode.invoke(player);
+            if (aimingMode == null) {
+                return;
+            }
+            if (aimingModeHasTarget == null) {
+                aimingModeHasTarget = field(aimingMode.getClass().getName(), "hasTarget");
+            }
+            boolean hasTarget = aimingModeHasTarget != null
+                    && aimingModeHasTarget.getBoolean(aimingMode);
+
+            Object core = getCore();
+            if (core == null) {
+                return;
+            }
+            Object color = hasTarget
+                    ? getValidTargetAimColor()
+                    : invokeObject(getNoTargetColorMethod(core), core);
+            if (color == null) {
+                return;
+            }
+
+            int playerIndex = ((Number) getPlayerIndex.invoke(player)).intValue();
+            Object reticle = getIsoReticle(playerIndex);
+            if (reticle == null) {
+                return;
+            }
+            if (setAimColor == null) {
+                setAimColor = reticle.getClass().getMethod("setAimColor", color.getClass());
+                setAimColor.setAccessible(true);
+            }
+            setAimColor.invoke(reticle, color);
+        } catch (Throwable throwable) {
+            logReticleError(throwable);
+        }
     }
 
     public static boolean overrideMouseCursorUpdate(boolean original) {
@@ -262,6 +331,186 @@ public final class Bridge {
             setSystemCursorMode(GLFW_CURSOR_NORMAL);
         }
         return original;
+    }
+
+    private static boolean shouldSkipReticle(boolean original) {
+        if (!isViewEnabled()) {
+            restoreReticlePresentation();
+            return original;
+        }
+        if (isFreeCursor() || isThirdPersonVehicle()) {
+            restoreReticlePresentation();
+            return true;
+        }
+
+        applyReticlePresentation();
+        return false;
+    }
+
+    private static void applyReticlePresentation() {
+        try {
+            Object core = getCore();
+            if (core == null) {
+                return;
+            }
+            Method showReticle = getShowReticleTextureMethod(core);
+            Method showValidTargetReticle = getShowValidTargetReticleTextureMethod(core);
+            Method crosshairIndex = getCrosshairTextureIndexMethod(core);
+            Method setShowReticle = setShowReticleTextureMethod(core);
+            Method setShowValidTargetReticle = setShowValidTargetReticleTextureMethod(core);
+            Method setCrosshairIndex = setCrosshairTextureIndexMethod(core);
+            if (showReticle == null || showValidTargetReticle == null || crosshairIndex == null
+                    || setShowReticle == null || setShowValidTargetReticle == null
+                    || setCrosshairIndex == null) {
+                return;
+            }
+            if (!reticleOptionsCaptured) {
+                savedShowReticleTexture = getBooleanOption(core, showReticle);
+                savedShowValidTargetReticleTexture = getBooleanOption(core, showValidTargetReticle);
+                savedCrosshairTextureIndex = getIntOption(core, crosshairIndex);
+                reticleOptionsCaptured = true;
+            }
+
+            invoke(setShowReticle, core, false);
+            invoke(setShowValidTargetReticle, core, false);
+            invoke(setCrosshairIndex, core, 0);
+        } catch (Throwable throwable) {
+            logReticleError(throwable);
+        }
+    }
+
+    private static void restoreReticlePresentation() {
+        if (!reticleOptionsCaptured) {
+            return;
+        }
+
+        try {
+            Object core = getCore();
+            if (core != null) {
+                invoke(setShowReticleTextureMethod(core), core, savedShowReticleTexture);
+                invoke(setShowValidTargetReticleTextureMethod(core), core,
+                        savedShowValidTargetReticleTexture);
+                invoke(setCrosshairTextureIndexMethod(core), core, savedCrosshairTextureIndex);
+            }
+        } catch (Throwable throwable) {
+            logReticleError(throwable);
+        } finally {
+            reticleOptionsCaptured = false;
+        }
+    }
+
+    private static Object getCore() {
+        try {
+            if (getCoreInstance == null) {
+                getCoreInstance = method("zombie.core.Core", "getInstance");
+            }
+            return invokeObject(getCoreInstance, null);
+        } catch (Throwable throwable) {
+            logReticleError(throwable);
+            return null;
+        }
+    }
+
+    private static Object getIsoReticle(int playerIndex) throws Exception {
+        if (getIsoReticleInstance == null) {
+            getIsoReticleInstance = method("zombie.iso.sprite.IsoReticle", "getInstance", int.class);
+        }
+        return getIsoReticleInstance == null ? null : getIsoReticleInstance.invoke(null, playerIndex);
+    }
+
+    private static Method getShowReticleTextureMethod(Object core) {
+        if (getOptionShowReticleTexture == null) {
+            getOptionShowReticleTexture = method(core.getClass().getName(), "getOptionShowReticleTexture");
+        }
+        return getOptionShowReticleTexture;
+    }
+
+    private static Method setShowReticleTextureMethod(Object core) {
+        if (setOptionShowReticleTexture == null) {
+            setOptionShowReticleTexture = method(core.getClass().getName(),
+                    "setOptionShowReticleTexture", boolean.class);
+        }
+        return setOptionShowReticleTexture;
+    }
+
+    private static Method getShowValidTargetReticleTextureMethod(Object core) {
+        if (getOptionShowValidTargetReticleTexture == null) {
+            getOptionShowValidTargetReticleTexture = method(core.getClass().getName(),
+                    "getOptionShowValidTargetReticleTexture");
+        }
+        return getOptionShowValidTargetReticleTexture;
+    }
+
+    private static Method setShowValidTargetReticleTextureMethod(Object core) {
+        if (setOptionShowValidTargetReticleTexture == null) {
+            setOptionShowValidTargetReticleTexture = method(core.getClass().getName(),
+                    "setOptionShowValidTargetReticleTexture", boolean.class);
+        }
+        return setOptionShowValidTargetReticleTexture;
+    }
+
+    private static Method getCrosshairTextureIndexMethod(Object core) {
+        if (getOptionCrosshairTextureIndex == null) {
+            getOptionCrosshairTextureIndex = method(core.getClass().getName(),
+                    "getOptionCrosshairTextureIndex");
+        }
+        return getOptionCrosshairTextureIndex;
+    }
+
+    private static Method setCrosshairTextureIndexMethod(Object core) {
+        if (setOptionCrosshairTextureIndex == null) {
+            setOptionCrosshairTextureIndex = method(core.getClass().getName(),
+                    "setOptionCrosshairTextureIndex", int.class);
+        }
+        return setOptionCrosshairTextureIndex;
+    }
+
+    private static Method getNoTargetColorMethod(Object core) {
+        if (getNoTargetColor == null) {
+            getNoTargetColor = method(core.getClass().getName(), "getNoTargetColor");
+        }
+        return getNoTargetColor;
+    }
+
+    private static Object getValidTargetAimColor() throws Exception {
+        if (validTargetAimColor != null) {
+            return validTargetAimColor;
+        }
+        if (colorInfoConstructor == null) {
+            Class<?> colorInfo = Class.forName("zombie.core.textures.ColorInfo");
+            colorInfoConstructor = colorInfo.getDeclaredConstructor(
+                    float.class, float.class, float.class, float.class);
+            colorInfoConstructor.setAccessible(true);
+        }
+        validTargetAimColor = colorInfoConstructor.newInstance(1.0f, 0.0f, 0.0f, 1.0f);
+        return validTargetAimColor;
+    }
+
+    private static boolean getBooleanOption(Object core, Method method) throws Exception {
+        return method != null && (Boolean) method.invoke(core);
+    }
+
+    private static int getIntOption(Object core, Method method) throws Exception {
+        return method == null ? 0 : ((Number) method.invoke(core)).intValue();
+    }
+
+    private static Object invokeObject(Method method, Object target, Object... arguments) throws Exception {
+        return method == null ? null : method.invoke(target, arguments);
+    }
+
+    private static void invoke(Method method, Object target, Object argument) throws Exception {
+        if (method != null) {
+            method.invoke(target, argument);
+        }
+    }
+
+    private static void logReticleError(Throwable throwable) {
+        if (reticleErrorLogged || !debugLogging) {
+            return;
+        }
+        reticleErrorLogged = true;
+        System.out.println("[Viewpoint Extended Support] reticle compatibility unavailable: "
+                + throwable.getClass().getSimpleName());
     }
 
     public static boolean isThirdPersonVehicle() {

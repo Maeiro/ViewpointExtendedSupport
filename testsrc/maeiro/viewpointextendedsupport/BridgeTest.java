@@ -62,6 +62,19 @@ public final class BridgeTest {
         check(Bridge.shouldSkipMouseCursorTexture(), "captured first-person mode must hide custom cursor texture");
         check(!Bridge.overrideMouseCursorVisibility(true), "captured Viewpoint mode must hide custom cursor texture");
         check(!Bridge.shouldSkipVanillaReticle(false), "captured mode must keep vanilla reticle");
+        check(!Bridge.shouldSkipViewpointReticle(false), "captured Viewpoint reticle must remain available");
+
+        zombie.core.Core core = zombie.core.Core.getInstance();
+        check(!core.showReticleTexture, "Viewpoint must hide the vanilla reticle texture");
+        check(!core.showValidTargetReticleTexture, "Viewpoint must hide the valid-target ring");
+        check(core.crosshairTextureIndex == 0, "Viewpoint must hide the vanilla crosshair pieces");
+        Bridge.updateViewpointAimColor(new AimPlayer(true));
+        zombie.core.textures.ColorInfo targetAimColor = zombie.iso.sprite.IsoReticle.getInstance(0).aimColor;
+        check(targetAimColor.r == 1.0f && targetAimColor.g == 0.0f && targetAimColor.b == 0.0f,
+                "valid target must use a red aim color");
+        Bridge.updateViewpointAimColor(new AimPlayer(false));
+        check(zombie.iso.sprite.IsoReticle.getInstance(0).aimColor == core.noTargetColor,
+                "no target must use the configured no-target color");
 
         IsoCamera.Character player = (IsoCamera.Character) IsoCamera.character;
         player.vehicle = new Object();
@@ -120,7 +133,10 @@ public final class BridgeTest {
         GameKeyboard.down.remove(56);
         Bridge.applyCursorOverride();
 
-        View.enabled = false;
+        Bridge.setViewEnabled(false);
+        check(core.showReticleTexture, "reticle texture option must be restored outside Viewpoint");
+        check(core.showValidTargetReticleTexture, "valid-target option must be restored outside Viewpoint");
+        check(core.crosshairTextureIndex == 2, "crosshair option must be restored outside Viewpoint");
         check(Bridge.adjustThirdPersonBoom(5.0f) == 5.0f,
                 "disabled Viewpoint mode must preserve the original camera distance");
         check(Bridge.overrideMouseCursorVisibility(true), "vanilla cursor visibility must be preserved outside Viewpoint");
@@ -130,5 +146,21 @@ public final class BridgeTest {
 
     private static void check(boolean condition, String message) {
         if (!condition) throw new AssertionError(message);
+    }
+
+    public static final class AimPlayer {
+        private final zombie.input.AimingMode aimingMode = new zombie.input.AimingMode();
+
+        public AimPlayer(boolean hasTarget) {
+            aimingMode.hasTarget = hasTarget;
+        }
+
+        public int getIndex() {
+            return 0;
+        }
+
+        public zombie.input.AimingMode getAimingMode() {
+            return aimingMode;
+        }
     }
 }

@@ -86,6 +86,14 @@ public final class Patches {
         }
     }
 
+    @Patch(className = "zombie.CombatManager", methodName = "updateReticle", warmUp = true)
+    public static class CombatReticle {
+        @Patch.OnExit
+        public static void exit(@Patch.Argument(0) Object player) {
+            Bridge.updateViewpointAimColor(player);
+        }
+    }
+
     @Patch(className = "zombie.iso.sprite.IsoCursor", methodName = "render", warmUp = true)
     public static class DirectIsoCursor {
         @Patch.OnEnter(skipOn = true)
