@@ -68,12 +68,16 @@ public final class BridgeTest {
         check(!core.showReticleTexture, "Viewpoint must hide the vanilla reticle texture");
         check(!core.showValidTargetReticleTexture, "Viewpoint must hide the valid-target ring");
         check(core.crosshairTextureIndex == 0, "Viewpoint must hide the vanilla crosshair pieces");
-        Bridge.updateViewpointAimColor(new AimPlayer(true));
+        zombie.iso.sprite.IsoReticle reticle = zombie.iso.sprite.IsoReticle.getInstance(0);
+        reticle.hasValidTarget = true;
+        reticle.aimColor = core.noTargetColor;
+        reticle.aimColor = (zombie.core.textures.ColorInfo)
+                Bridge.overrideViewpointAimColor(reticle, core.noTargetColor);
         zombie.core.textures.ColorInfo targetAimColor = zombie.iso.sprite.IsoReticle.getInstance(0).aimColor;
         check(targetAimColor.r == 1.0f && targetAimColor.g == 0.0f && targetAimColor.b == 0.0f,
                 "valid target must use a red aim color");
-        Bridge.updateViewpointAimColor(new AimPlayer(false));
-        check(zombie.iso.sprite.IsoReticle.getInstance(0).aimColor == core.noTargetColor,
+        reticle.hasValidTarget = false;
+        check(Bridge.overrideViewpointAimColor(reticle, core.noTargetColor) == core.noTargetColor,
                 "no target must use the configured no-target color");
 
         IsoCamera.Character player = (IsoCamera.Character) IsoCamera.character;
@@ -148,19 +152,4 @@ public final class BridgeTest {
         if (!condition) throw new AssertionError(message);
     }
 
-    public static final class AimPlayer {
-        private final zombie.input.AimingMode aimingMode = new zombie.input.AimingMode();
-
-        public AimPlayer(boolean hasTarget) {
-            aimingMode.hasTarget = hasTarget;
-        }
-
-        public int getIndex() {
-            return 0;
-        }
-
-        public zombie.input.AimingMode getAimingMode() {
-            return aimingMode;
-        }
-    }
 }

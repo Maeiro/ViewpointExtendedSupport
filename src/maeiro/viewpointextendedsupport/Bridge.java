@@ -60,12 +60,7 @@ public final class Bridge {
     private static volatile Method setOptionShowValidTargetReticleTexture;
     private static volatile Method getOptionCrosshairTextureIndex;
     private static volatile Method setOptionCrosshairTextureIndex;
-    private static volatile Method getNoTargetColor;
-    private static volatile Method getPlayerIndex;
-    private static volatile Method getAimingMode;
-    private static volatile Method getIsoReticleInstance;
-    private static volatile Method setAimColor;
-    private static volatile Field aimingModeHasTarget;
+    private static volatile Field isoReticleHasValidTarget;
     private static volatile Constructor<?> colorInfoConstructor;
     private static volatile Object validTargetAimColor;
 
@@ -251,55 +246,23 @@ public final class Bridge {
         return shouldSkipReticle(original);
     }
 
-    public static void updateViewpointAimColor(Object player) {
-        if (!isViewEnabled() || isFreeCursor() || isThirdPersonVehicle() || player == null) {
-            return;
+    public static Object overrideViewpointAimColor(Object reticle, Object originalColor) {
+        if (originalColor == null || !isViewEnabled() || isFreeCursor() || isThirdPersonVehicle()) {
+            return originalColor;
         }
 
         try {
-            if (getPlayerIndex == null) {
-                getPlayerIndex = player.getClass().getMethod("getIndex");
-                getPlayerIndex.setAccessible(true);
+            if (isoReticleHasValidTarget == null) {
+                isoReticleHasValidTarget = field(reticle.getClass().getName(), "hasValidTarget");
             }
-            if (getAimingMode == null) {
-                getAimingMode = player.getClass().getMethod("getAimingMode");
-                getAimingMode.setAccessible(true);
+            if (isoReticleHasValidTarget != null
+                    && isoReticleHasValidTarget.getBoolean(reticle)) {
+                return getValidTargetAimColor();
             }
-
-            Object aimingMode = getAimingMode.invoke(player);
-            if (aimingMode == null) {
-                return;
-            }
-            if (aimingModeHasTarget == null) {
-                aimingModeHasTarget = field(aimingMode.getClass().getName(), "hasTarget");
-            }
-            boolean hasTarget = aimingModeHasTarget != null
-                    && aimingModeHasTarget.getBoolean(aimingMode);
-
-            Object core = getCore();
-            if (core == null) {
-                return;
-            }
-            Object color = hasTarget
-                    ? getValidTargetAimColor()
-                    : invokeObject(getNoTargetColorMethod(core), core);
-            if (color == null) {
-                return;
-            }
-
-            int playerIndex = ((Number) getPlayerIndex.invoke(player)).intValue();
-            Object reticle = getIsoReticle(playerIndex);
-            if (reticle == null) {
-                return;
-            }
-            if (setAimColor == null) {
-                setAimColor = reticle.getClass().getMethod("setAimColor", color.getClass());
-                setAimColor.setAccessible(true);
-            }
-            setAimColor.invoke(reticle, color);
         } catch (Throwable throwable) {
             logReticleError(throwable);
         }
+        return originalColor;
     }
 
     public static boolean overrideMouseCursorUpdate(boolean original) {
@@ -411,13 +374,6 @@ public final class Bridge {
         }
     }
 
-    private static Object getIsoReticle(int playerIndex) throws Exception {
-        if (getIsoReticleInstance == null) {
-            getIsoReticleInstance = method("zombie.iso.sprite.IsoReticle", "getInstance", int.class);
-        }
-        return getIsoReticleInstance == null ? null : getIsoReticleInstance.invoke(null, playerIndex);
-    }
-
     private static Method getShowReticleTextureMethod(Object core) {
         if (getOptionShowReticleTexture == null) {
             getOptionShowReticleTexture = method(core.getClass().getName(), "getOptionShowReticleTexture");
@@ -463,13 +419,6 @@ public final class Bridge {
                     "setOptionCrosshairTextureIndex", int.class);
         }
         return setOptionCrosshairTextureIndex;
-    }
-
-    private static Method getNoTargetColorMethod(Object core) {
-        if (getNoTargetColor == null) {
-            getNoTargetColor = method(core.getClass().getName(), "getNoTargetColor");
-        }
-        return getNoTargetColor;
     }
 
     private static Object getValidTargetAimColor() throws Exception {

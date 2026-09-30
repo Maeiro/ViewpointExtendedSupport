@@ -86,11 +86,12 @@ public final class Patches {
         }
     }
 
-    @Patch(className = "zombie.CombatManager", methodName = "updateReticle", warmUp = true)
-    public static class CombatReticle {
-        @Patch.OnExit
-        public static void exit(@Patch.Argument(0) Object player) {
-            Bridge.updateViewpointAimColor(player);
+    @Patch(className = "zombie.iso.sprite.IsoReticle", methodName = "setAimColor", warmUp = true)
+    public static class ViewpointAimColor {
+        @Patch.OnEnter
+        public static void enter(@Patch.This(readOnly = true) Object reticle,
+                                 @Patch.Argument(value = 0, readOnly = false) Object color) {
+            color = Bridge.overrideViewpointAimColor(reticle, color);
         }
     }
 

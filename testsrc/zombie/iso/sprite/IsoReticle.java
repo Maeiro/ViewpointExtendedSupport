@@ -4,6 +4,7 @@ import zombie.core.textures.ColorInfo;
 
 public final class IsoReticle {
     private static final IsoReticle INSTANCE = new IsoReticle();
+    public boolean hasValidTarget;
     public ColorInfo aimColor;
 
     public static IsoReticle getInstance(int playerIndex) {
