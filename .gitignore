@@ -1,0 +1,7 @@
+build/
+*.class
+.idea/
+.vscode/
+*.log
+hs_err_pid*.log
+
