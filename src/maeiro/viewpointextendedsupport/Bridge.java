@@ -157,6 +157,9 @@ public final class Bridge {
             return;
         }
         pendingMouseWheel = clampWheel(pendingMouseWheel + wheel);
+        if (debugLogging) {
+            System.out.println("[Viewpoint Extended Support] mouse wheel captured: delta=" + wheel);
+        }
     }
 
     public static float adjustThirdPersonBoom(float original) {

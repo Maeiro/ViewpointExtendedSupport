@@ -30,8 +30,8 @@ public final class Patches {
         }
     }
 
-    @Patch(className = "viewpoint.Hooks", methodName = "mouseUpdated", warmUp = true)
-    public static class MouseUpdated {
+    @Patch(className = "viewpoint.interact.LootMenu", methodName = "wheel", warmUp = true)
+    public static class LootWheel {
         @Patch.OnEnter
         public static void enter() {
             Bridge.captureMouseWheel();
