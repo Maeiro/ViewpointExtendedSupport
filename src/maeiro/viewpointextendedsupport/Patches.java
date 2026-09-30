@@ -22,6 +22,14 @@ public final class Patches {
         }
     }
 
+    @Patch(className = "viewpoint.input.ThirdPerson", methodName = "boom", warmUp = true)
+    public static class ThirdPersonBoom {
+        @Patch.OnExit
+        public static void exit(@Patch.Return(readOnly = false) float result) {
+            result = Bridge.adjustThirdPersonBoom(result);
+        }
+    }
+
     @Patch(className = "viewpoint.FP", methodName = "cursorMode", warmUp = true)
     public static class CursorMode {
         @Patch.OnExit

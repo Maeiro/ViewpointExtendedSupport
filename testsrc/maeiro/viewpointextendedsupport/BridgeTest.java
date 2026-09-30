@@ -6,6 +6,7 @@ import viewpoint.core.View;
 import viewpoint.input.Look;
 import viewpoint.input.ThirdPerson;
 import zombie.input.GameKeyboard;
+import zombie.input.Mouse;
 import org.lwjgl.glfw.GLFW;
 import zombie.iso.IsoCamera;
 
@@ -84,7 +85,29 @@ public final class BridgeTest {
         check(!Bridge.overrideMouseCursorUpdate(false), "released cursor must allow normal update");
         check(GLFW.mode == 212993, "released cursor must restore normal system cursor");
 
+        Mouse.wheelState = 1;
+        Bridge.pollThirdPersonZoom();
+        check(Bridge.adjustThirdPersonBoom(5.0f) < 5.0f,
+                "mouse wheel up must move the third-person camera closer");
+        Mouse.wheelState = -2;
+        Bridge.pollThirdPersonZoom();
+        check(Bridge.adjustThirdPersonBoom(5.0f) > 5.0f,
+                "mouse wheel down must move the third-person camera farther away");
+        Mouse.wheelState = 0;
+
+        float zoomBeforeFreeCursor = Bridge.adjustThirdPersonBoom(5.0f);
+        GameKeyboard.down.add(56);
+        Bridge.applyCursorOverride();
+        Mouse.wheelState = 1;
+        Bridge.pollThirdPersonZoom();
+        check(Bridge.adjustThirdPersonBoom(5.0f) == zoomBeforeFreeCursor,
+                "free cursor must not consume third-person camera zoom");
+        GameKeyboard.down.remove(56);
+        Bridge.applyCursorOverride();
+
         View.enabled = false;
+        check(Bridge.adjustThirdPersonBoom(5.0f) == 5.0f,
+                "disabled Viewpoint mode must preserve the original camera distance");
         check(Bridge.overrideMouseCursorVisibility(true), "vanilla cursor visibility must be preserved outside Viewpoint");
 
         System.out.println("ViewpointExtendedSupport BridgeTest: PASS");

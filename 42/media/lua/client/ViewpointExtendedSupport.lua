@@ -14,6 +14,7 @@ if PZAPI and PZAPI.ModOptions then
     options.autoUi = modOptions:addTickBox("AutoFreeCursorInUI", "Enable free mouse in inventory and UI windows", true)
     options.ergonomicUi = modOptions:addTickBox("ErgonomicUIIntegration", "Integrate with Ergonomic UI", true)
     options.vehicleCamera = modOptions:addTickBox("ThirdPersonInVehicles", "Use third person in vehicles", true)
+    options.thirdPersonScrollZoom = modOptions:addTickBox("ThirdPersonScrollZoom", "Zoom third-person camera with mouse wheel", true)
     options.cursorDiagnostics = modOptions:addTickBox("CursorDiagnostics", "Log cursor and reticle diagnostics", true)
 end
 
@@ -34,7 +35,8 @@ local function syncConfiguration()
         optionValue(options.cursorKey, 56),
         optionValue(options.autoUi, true),
         optionValue(options.viewModeKey, 0),
-        optionValue(options.cursorDiagnostics, true)
+        optionValue(options.cursorDiagnostics, true),
+        optionValue(options.thirdPersonScrollZoom, true)
     )
 end
 
@@ -176,6 +178,9 @@ Events.OnTick.Add(function()
     tickCounter = tickCounter + 1
     if Support and Support.diagnosticTick then
         Support.diagnosticTick()
+    end
+    if Support and Support.pollThirdPersonZoom then
+        Support.pollThirdPersonZoom()
     end
     if tickCounter % 10 == 0 then
         syncConfiguration()

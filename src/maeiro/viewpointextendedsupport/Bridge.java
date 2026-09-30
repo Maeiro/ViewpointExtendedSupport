@@ -14,6 +14,10 @@ public final class Bridge {
     private static final int GLFW_CURSOR = 208897;
     private static final int GLFW_CURSOR_NORMAL = 212993;
     private static final int GLFW_CURSOR_HIDDEN = 212994;
+    private static final float THIRD_PERSON_ZOOM_STEP = 0.5f;
+    private static final float THIRD_PERSON_ZOOM_MIN = -2.0f;
+    private static final float THIRD_PERSON_ZOOM_MAX = 8.0f;
+    private static final float THIRD_PERSON_BOOM_MIN = 0.5f;
 
     private static volatile int firstPersonKey = VIEWPOINT_TOGGLE_KEY;
     private static volatile int thirdPersonKey = VIEWPOINT_TOGGLE_KEY;
@@ -23,6 +27,8 @@ public final class Bridge {
     private static volatile int freeCursorKey;
     private static volatile boolean autoCursorInUi = true;
     private static volatile boolean debugLogging = true;
+    private static volatile boolean thirdPersonScrollZoom = true;
+    private static volatile float thirdPersonZoomOffset;
     private static volatile boolean autoCursorRequested;
     private static volatile boolean forcedCursor;
     private static volatile boolean lootCursorRequested;
@@ -40,6 +46,7 @@ public final class Bridge {
     private static volatile Method resetCaches;
     private static volatile Method getCameraCharacter;
     private static volatile Method getPlayerVehicle;
+    private static volatile Method getMouseWheelState;
     private static volatile Class<?> vehicleMethodClass;
     private static volatile Method getDisplayWindow;
     private static volatile Method glfwSetInputMode;
@@ -69,6 +76,13 @@ public final class Bridge {
     public static void configure(int firstKey, int thirdKey, boolean requireShift,
                                  boolean holdCursor, int cursorKey, boolean autoUi,
                                  int modeToggleKey, boolean debug) {
+        configure(firstKey, thirdKey, requireShift, holdCursor, cursorKey, autoUi,
+                modeToggleKey, debug, true);
+    }
+
+    public static void configure(int firstKey, int thirdKey, boolean requireShift,
+                                 boolean holdCursor, int cursorKey, boolean autoUi,
+                                 int modeToggleKey, boolean debug, boolean scrollZoom) {
         firstPersonKey = Math.max(0, firstKey);
         thirdPersonKey = Math.max(0, thirdKey);
         viewModeToggleKey = Math.max(0, modeToggleKey);
@@ -77,6 +91,7 @@ public final class Bridge {
         freeCursorKey = Math.max(0, cursorKey);
         autoCursorInUi = autoUi;
         debugLogging = debug;
+        thirdPersonScrollZoom = scrollZoom;
     }
 
     public static void setAutoCursorRequested(boolean requested) {
@@ -112,7 +127,34 @@ public final class Bridge {
                 + ", auto=" + autoCursorRequested
                 + ", third=" + isThirdPerson()
                 + ", vehicle=" + isThirdPersonVehicle()
+                + ", zoomOffset=" + thirdPersonZoomOffset
                 + ", system=" + systemCursorModeName(readSystemCursorMode()));
+    }
+
+    public static void pollThirdPersonZoom() {
+        if (!thirdPersonScrollZoom || !isViewEnabled() || !isThirdPerson() || isFreeCursor()) {
+            return;
+        }
+
+        int wheel = readMouseWheelState();
+        if (wheel == 0) {
+            return;
+        }
+
+        float previous = thirdPersonZoomOffset;
+        float next = clamp(previous - (wheel * THIRD_PERSON_ZOOM_STEP),
+                THIRD_PERSON_ZOOM_MIN, THIRD_PERSON_ZOOM_MAX);
+        thirdPersonZoomOffset = next;
+        if (debugLogging && previous != next) {
+            System.out.println("[Viewpoint Extended Support] third-person camera zoom: offset=" + next);
+        }
+    }
+
+    public static float adjustThirdPersonBoom(float original) {
+        if (!thirdPersonScrollZoom || !isViewEnabled() || !isThirdPerson()) {
+            return original;
+        }
+        return Math.max(THIRD_PERSON_BOOM_MIN, original + thirdPersonZoomOffset);
     }
 
     public static boolean isViewEnabled() {
@@ -347,6 +389,24 @@ public final class Bridge {
         } catch (Throwable ignored) {
             return false;
         }
+    }
+
+    private static int readMouseWheelState() {
+        try {
+            if (getMouseWheelState == null) {
+                getMouseWheelState = method("zombie.input.Mouse", "getWheelState");
+            }
+            if (getMouseWheelState == null) {
+                return 0;
+            }
+            return ((Number) getMouseWheelState.invoke(null)).intValue();
+        } catch (Throwable ignored) {
+            return 0;
+        }
+    }
+
+    private static float clamp(float value, float minimum, float maximum) {
+        return Math.max(minimum, Math.min(maximum, value));
     }
 
     private static void eat(int key) {
