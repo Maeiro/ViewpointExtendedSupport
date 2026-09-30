@@ -1,6 +1,7 @@
 package maeiro.viewpointextendedsupport;
 
 import me.zed_0xff.zombie_buddy.Patch;
+import zombie.core.textures.ColorInfo;
 
 public final class Patches {
     private Patches() {
@@ -90,8 +91,16 @@ public final class Patches {
     public static class ViewpointAimColor {
         @Patch.OnEnter
         public static void enter(@Patch.This(readOnly = true) Object reticle,
-                                 @Patch.Argument(value = 0, readOnly = false) Object color) {
-            color = Bridge.overrideViewpointAimColor(reticle, color);
+                                 @Patch.Argument(value = 0, readOnly = false) ColorInfo color) {
+            color = (ColorInfo) Bridge.overrideViewpointAimColor(reticle, color);
+        }
+    }
+
+    @Patch(className = "zombie.iso.sprite.IsoReticle", methodName = "render", warmUp = true)
+    public static class IsoReticlePresentation {
+        @Patch.OnEnter
+        public static void enter() {
+            Bridge.enforceReticlePresentation();
         }
     }
 

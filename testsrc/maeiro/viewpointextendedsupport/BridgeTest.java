@@ -63,6 +63,7 @@ public final class BridgeTest {
         check(!Bridge.overrideMouseCursorVisibility(true), "captured Viewpoint mode must hide custom cursor texture");
         check(!Bridge.shouldSkipVanillaReticle(false), "captured mode must keep vanilla reticle");
         check(!Bridge.shouldSkipViewpointReticle(false), "captured Viewpoint reticle must remain available");
+        Bridge.enforceReticlePresentation();
 
         zombie.core.Core core = zombie.core.Core.getInstance();
         check(!core.showReticleTexture, "Viewpoint must hide the vanilla reticle texture");

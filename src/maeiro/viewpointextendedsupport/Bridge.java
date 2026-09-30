@@ -265,6 +265,16 @@ public final class Bridge {
         return originalColor;
     }
 
+    public static void enforceReticlePresentation() {
+        if (!isViewEnabled()) {
+            restoreReticlePresentation();
+        } else if (isFreeCursor() || isThirdPersonVehicle()) {
+            restoreReticlePresentation();
+        } else {
+            applyReticlePresentation();
+        }
+    }
+
     public static boolean overrideMouseCursorUpdate(boolean original) {
         recordHook(6, "Hooks.skipMouseCursorUpdate", original);
         return overrideMouseCursorUpdateInternal(original);
