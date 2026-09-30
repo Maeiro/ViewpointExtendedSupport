@@ -1,7 +1,7 @@
 package maeiro.viewpointextendedsupport;
 
 import me.zed_0xff.zombie_buddy.Patch;
-import zombie.core.textures.ColorInfo;
+import zombie.iso.Vector3;
 
 public final class Patches {
     private Patches() {
@@ -87,20 +87,20 @@ public final class Patches {
         }
     }
 
-    @Patch(className = "zombie.iso.sprite.IsoReticle", methodName = "setAimColor", warmUp = true)
-    public static class ViewpointAimColor {
-        @Patch.OnEnter
-        public static void enter(@Patch.This(readOnly = true) Object reticle,
-                                 @Patch.Argument(value = 0, readOnly = false) ColorInfo color) {
-            color = (ColorInfo) Bridge.overrideViewpointAimColor(reticle, color);
+    @Patch(className = "zombie.core.physics.BallisticsController",
+            methodName = "calculateMuzzlePosition", warmUp = true)
+    public static class ViewpointMuzzleDirection {
+        @Patch.OnExit
+        public static void exit(@Patch.Argument(value = 1, readOnly = true) Vector3 direction) {
+            Bridge.adjustViewpointMuzzleDirection(direction);
         }
     }
 
-    @Patch(className = "zombie.iso.sprite.IsoReticle", methodName = "render", warmUp = true)
-    public static class IsoReticlePresentation {
-        @Patch.OnEnter
-        public static void enter() {
-            Bridge.enforceReticlePresentation();
+    @Patch(className = "zombie.characters.IsoPlayer", methodName = "setAngleFromAim", warmUp = true)
+    public static class ViewpointAimPitch {
+        @Patch.OnExit
+        public static void exit(@Patch.This(readOnly = true) Object player) {
+            Bridge.syncViewpointAimPitch(player);
         }
     }
 

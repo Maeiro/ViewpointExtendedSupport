@@ -1,10 +1,10 @@
 package maeiro.viewpointextendedsupport;
 
-import java.lang.reflect.Constructor;
 import java.lang.reflect.Field;
 import java.lang.reflect.Method;
 
 import me.zed_0xff.zombie_buddy.Exposer;
+import zombie.iso.Vector3;
 
 @Exposer.LuaClass(name = "ViewpointExtendedSupport")
 public final class Bridge {
@@ -49,21 +49,13 @@ public final class Bridge {
     private static volatile Method getCameraCharacter;
     private static volatile Method getPlayerVehicle;
     private static volatile Method getMouseWheelState;
+    private static volatile Method isAimingMethod;
+    private static volatile Method setTargetAimPitchMethod;
     private static volatile Class<?> vehicleMethodClass;
+    private static volatile Class<?> aimMethodClass;
     private static volatile Method getDisplayWindow;
     private static volatile Method glfwSetInputMode;
     private static volatile Method glfwGetInputMode;
-    private static volatile Method getCoreInstance;
-    private static volatile Method getOptionShowReticleTexture;
-    private static volatile Method setOptionShowReticleTexture;
-    private static volatile Method getOptionShowValidTargetReticleTexture;
-    private static volatile Method setOptionShowValidTargetReticleTexture;
-    private static volatile Method getOptionCrosshairTextureIndex;
-    private static volatile Method setOptionCrosshairTextureIndex;
-    private static volatile Field isoReticleHasValidTarget;
-    private static volatile Constructor<?> colorInfoConstructor;
-    private static volatile Object validTargetAimColor;
-
     private static volatile long vanillaCursorHookCalls;
     private static volatile long viewpointCursorHookCalls;
     private static volatile long directCursorRenderCalls;
@@ -81,11 +73,6 @@ public final class Bridge {
     private static volatile boolean diagnosticAutoCursor;
     private static volatile boolean diagnosticThirdPerson;
     private static volatile boolean diagnosticVehicle;
-    private static volatile boolean reticleOptionsCaptured;
-    private static volatile boolean savedShowReticleTexture;
-    private static volatile boolean savedShowValidTargetReticleTexture;
-    private static volatile int savedCrosshairTextureIndex;
-    private static volatile boolean reticleErrorLogged;
 
     private Bridge() {
     }
@@ -199,9 +186,6 @@ public final class Bridge {
 
     public static void setViewEnabled(boolean enabled) {
         setBoolean(viewEnabled, "viewpoint.core.View", "enabled", enabled);
-        if (!enabled) {
-            restoreReticlePresentation();
-        }
     }
 
     public static boolean isFreeCursor() {
@@ -246,32 +230,49 @@ public final class Bridge {
         return shouldSkipReticle(original);
     }
 
-    public static Object overrideViewpointAimColor(Object reticle, Object originalColor) {
-        if (originalColor == null || !isViewEnabled() || isFreeCursor() || isThirdPersonVehicle()) {
-            return originalColor;
+    public static void adjustViewpointMuzzleDirection(Vector3 direction) {
+        if (direction == null || !isViewEnabled() || isFreeCursor() || isThirdPersonVehicle()) {
+            return;
+        }
+
+        float horizontalLength = (float) Math.sqrt(
+                direction.x * direction.x + direction.y * direction.y);
+        if (horizontalLength <= 0.0001f) {
+            float yaw = getViewpointYaw();
+            direction.x = (float) Math.cos(yaw);
+            direction.y = (float) Math.sin(yaw);
+            horizontalLength = 1.0f;
+        }
+
+        float pitch = getViewpointPitch();
+        float horizontalScale = (float) Math.cos(pitch);
+        direction.set(
+                direction.x / horizontalLength * horizontalScale,
+                direction.y / horizontalLength * horizontalScale,
+                (float) Math.sin(pitch));
+    }
+
+    public static void syncViewpointAimPitch(Object player) {
+        if (player == null || !isViewEnabled() || isFreeCursor() || isThirdPersonVehicle()) {
+            return;
         }
 
         try {
-            if (isoReticleHasValidTarget == null) {
-                isoReticleHasValidTarget = field(reticle.getClass().getName(), "hasValidTarget");
+            if (aimMethodClass != player.getClass()
+                    || isAimingMethod == null || setTargetAimPitchMethod == null) {
+                isAimingMethod = player.getClass().getMethod("isAiming");
+                setTargetAimPitchMethod = player.getClass().getMethod(
+                        "setTargetVerticalAimAngle", float.class);
+                isAimingMethod.setAccessible(true);
+                setTargetAimPitchMethod.setAccessible(true);
+                aimMethodClass = player.getClass();
             }
-            if (isoReticleHasValidTarget != null
-                    && isoReticleHasValidTarget.getBoolean(reticle)) {
-                return getValidTargetAimColor();
+            if (!Boolean.TRUE.equals(isAimingMethod.invoke(player))) {
+                return;
             }
-        } catch (Throwable throwable) {
-            logReticleError(throwable);
-        }
-        return originalColor;
-    }
-
-    public static void enforceReticlePresentation() {
-        if (!isViewEnabled()) {
-            restoreReticlePresentation();
-        } else if (isFreeCursor() || isThirdPersonVehicle()) {
-            restoreReticlePresentation();
-        } else {
-            applyReticlePresentation();
+            setTargetAimPitchMethod.invoke(player,
+                    (float) Math.toDegrees(getViewpointPitch()));
+        } catch (Throwable ignored) {
         }
     }
 
@@ -308,168 +309,35 @@ public final class Bridge {
 
     private static boolean shouldSkipReticle(boolean original) {
         if (!isViewEnabled()) {
-            restoreReticlePresentation();
             return original;
         }
         if (isFreeCursor() || isThirdPersonVehicle()) {
-            restoreReticlePresentation();
             return true;
         }
 
-        applyReticlePresentation();
         return false;
     }
 
-    private static void applyReticlePresentation() {
+    private static float getViewpointYaw() {
         try {
-            Object core = getCore();
-            if (core == null) {
-                return;
+            if (lookYaw == null) {
+                lookYaw = field("viewpoint.input.Look", "yaw");
             }
-            Method showReticle = getShowReticleTextureMethod(core);
-            Method showValidTargetReticle = getShowValidTargetReticleTextureMethod(core);
-            Method crosshairIndex = getCrosshairTextureIndexMethod(core);
-            Method setShowReticle = setShowReticleTextureMethod(core);
-            Method setShowValidTargetReticle = setShowValidTargetReticleTextureMethod(core);
-            Method setCrosshairIndex = setCrosshairTextureIndexMethod(core);
-            if (showReticle == null || showValidTargetReticle == null || crosshairIndex == null
-                    || setShowReticle == null || setShowValidTargetReticle == null
-                    || setCrosshairIndex == null) {
-                return;
-            }
-            if (!reticleOptionsCaptured) {
-                savedShowReticleTexture = getBooleanOption(core, showReticle);
-                savedShowValidTargetReticleTexture = getBooleanOption(core, showValidTargetReticle);
-                savedCrosshairTextureIndex = getIntOption(core, crosshairIndex);
-                reticleOptionsCaptured = true;
-            }
-
-            invoke(setShowReticle, core, false);
-            invoke(setShowValidTargetReticle, core, false);
-            invoke(setCrosshairIndex, core, 0);
-        } catch (Throwable throwable) {
-            logReticleError(throwable);
+            return lookYaw == null ? 0.0f : lookYaw.getFloat(null);
+        } catch (Throwable ignored) {
+            return 0.0f;
         }
     }
 
-    private static void restoreReticlePresentation() {
-        if (!reticleOptionsCaptured) {
-            return;
-        }
-
+    private static float getViewpointPitch() {
         try {
-            Object core = getCore();
-            if (core != null) {
-                invoke(setShowReticleTextureMethod(core), core, savedShowReticleTexture);
-                invoke(setShowValidTargetReticleTextureMethod(core), core,
-                        savedShowValidTargetReticleTexture);
-                invoke(setCrosshairTextureIndexMethod(core), core, savedCrosshairTextureIndex);
+            if (lookPitch == null) {
+                lookPitch = field("viewpoint.input.Look", "pitch");
             }
-        } catch (Throwable throwable) {
-            logReticleError(throwable);
-        } finally {
-            reticleOptionsCaptured = false;
+            return lookPitch == null ? 0.0f : lookPitch.getFloat(null);
+        } catch (Throwable ignored) {
+            return 0.0f;
         }
-    }
-
-    private static Object getCore() {
-        try {
-            if (getCoreInstance == null) {
-                getCoreInstance = method("zombie.core.Core", "getInstance");
-            }
-            return invokeObject(getCoreInstance, null);
-        } catch (Throwable throwable) {
-            logReticleError(throwable);
-            return null;
-        }
-    }
-
-    private static Method getShowReticleTextureMethod(Object core) {
-        if (getOptionShowReticleTexture == null) {
-            getOptionShowReticleTexture = method(core.getClass().getName(), "getOptionShowReticleTexture");
-        }
-        return getOptionShowReticleTexture;
-    }
-
-    private static Method setShowReticleTextureMethod(Object core) {
-        if (setOptionShowReticleTexture == null) {
-            setOptionShowReticleTexture = method(core.getClass().getName(),
-                    "setOptionShowReticleTexture", boolean.class);
-        }
-        return setOptionShowReticleTexture;
-    }
-
-    private static Method getShowValidTargetReticleTextureMethod(Object core) {
-        if (getOptionShowValidTargetReticleTexture == null) {
-            getOptionShowValidTargetReticleTexture = method(core.getClass().getName(),
-                    "getOptionShowValidTargetReticleTexture");
-        }
-        return getOptionShowValidTargetReticleTexture;
-    }
-
-    private static Method setShowValidTargetReticleTextureMethod(Object core) {
-        if (setOptionShowValidTargetReticleTexture == null) {
-            setOptionShowValidTargetReticleTexture = method(core.getClass().getName(),
-                    "setOptionShowValidTargetReticleTexture", boolean.class);
-        }
-        return setOptionShowValidTargetReticleTexture;
-    }
-
-    private static Method getCrosshairTextureIndexMethod(Object core) {
-        if (getOptionCrosshairTextureIndex == null) {
-            getOptionCrosshairTextureIndex = method(core.getClass().getName(),
-                    "getOptionCrosshairTextureIndex");
-        }
-        return getOptionCrosshairTextureIndex;
-    }
-
-    private static Method setCrosshairTextureIndexMethod(Object core) {
-        if (setOptionCrosshairTextureIndex == null) {
-            setOptionCrosshairTextureIndex = method(core.getClass().getName(),
-                    "setOptionCrosshairTextureIndex", int.class);
-        }
-        return setOptionCrosshairTextureIndex;
-    }
-
-    private static Object getValidTargetAimColor() throws Exception {
-        if (validTargetAimColor != null) {
-            return validTargetAimColor;
-        }
-        if (colorInfoConstructor == null) {
-            Class<?> colorInfo = Class.forName("zombie.core.textures.ColorInfo");
-            colorInfoConstructor = colorInfo.getDeclaredConstructor(
-                    float.class, float.class, float.class, float.class);
-            colorInfoConstructor.setAccessible(true);
-        }
-        validTargetAimColor = colorInfoConstructor.newInstance(1.0f, 0.0f, 0.0f, 1.0f);
-        return validTargetAimColor;
-    }
-
-    private static boolean getBooleanOption(Object core, Method method) throws Exception {
-        return method != null && (Boolean) method.invoke(core);
-    }
-
-    private static int getIntOption(Object core, Method method) throws Exception {
-        return method == null ? 0 : ((Number) method.invoke(core)).intValue();
-    }
-
-    private static Object invokeObject(Method method, Object target, Object... arguments) throws Exception {
-        return method == null ? null : method.invoke(target, arguments);
-    }
-
-    private static void invoke(Method method, Object target, Object argument) throws Exception {
-        if (method != null) {
-            method.invoke(target, argument);
-        }
-    }
-
-    private static void logReticleError(Throwable throwable) {
-        if (reticleErrorLogged || !debugLogging) {
-            return;
-        }
-        reticleErrorLogged = true;
-        System.out.println("[Viewpoint Extended Support] reticle compatibility unavailable: "
-                + throwable.getClass().getSimpleName());
     }
 
     public static boolean isThirdPersonVehicle() {

@@ -9,6 +9,7 @@ import zombie.input.GameKeyboard;
 import zombie.input.Mouse;
 import org.lwjgl.glfw.GLFW;
 import zombie.iso.IsoCamera;
+import zombie.iso.Vector3;
 
 public final class BridgeTest {
     public static void main(String[] args) {
@@ -63,23 +64,23 @@ public final class BridgeTest {
         check(!Bridge.overrideMouseCursorVisibility(true), "captured Viewpoint mode must hide custom cursor texture");
         check(!Bridge.shouldSkipVanillaReticle(false), "captured mode must keep vanilla reticle");
         check(!Bridge.shouldSkipViewpointReticle(false), "captured Viewpoint reticle must remain available");
-        Bridge.enforceReticlePresentation();
 
         zombie.core.Core core = zombie.core.Core.getInstance();
-        check(!core.showReticleTexture, "Viewpoint must hide the vanilla reticle texture");
-        check(!core.showValidTargetReticleTexture, "Viewpoint must hide the valid-target ring");
-        check(core.crosshairTextureIndex == 0, "Viewpoint must hide the vanilla crosshair pieces");
-        zombie.iso.sprite.IsoReticle reticle = zombie.iso.sprite.IsoReticle.getInstance(0);
-        reticle.hasValidTarget = true;
-        reticle.aimColor = core.noTargetColor;
-        reticle.aimColor = (zombie.core.textures.ColorInfo)
-                Bridge.overrideViewpointAimColor(reticle, core.noTargetColor);
-        zombie.core.textures.ColorInfo targetAimColor = zombie.iso.sprite.IsoReticle.getInstance(0).aimColor;
-        check(targetAimColor.r == 1.0f && targetAimColor.g == 0.0f && targetAimColor.b == 0.0f,
-                "valid target must use a red aim color");
-        reticle.hasValidTarget = false;
-        check(Bridge.overrideViewpointAimColor(reticle, core.noTargetColor) == core.noTargetColor,
-                "no target must use the configured no-target color");
+        check(core.showReticleTexture, "Viewpoint must preserve the vanilla reticle texture");
+        check(core.showValidTargetReticleTexture, "Viewpoint must preserve the valid-target ring");
+        check(core.crosshairTextureIndex == 2, "Viewpoint must preserve the vanilla crosshair pieces");
+
+        Look.pitch = 0.0f;
+        Vector3 direction = new Vector3(1.0f, 0.0f, 0.25f);
+        Bridge.adjustViewpointMuzzleDirection(direction);
+        check(Math.abs(direction.x - 1.0f) < 0.001f && Math.abs(direction.z) < 0.001f,
+                "level Viewpoint aim must use a level muzzle direction");
+
+        Look.pitch = -0.5f;
+        direction.set(1.0f, 0.0f, 0.0f);
+        Bridge.adjustViewpointMuzzleDirection(direction);
+        check(direction.x > 0.8f && direction.z < -0.4f,
+                "looking down must pitch the muzzle down");
 
         IsoCamera.Character player = (IsoCamera.Character) IsoCamera.character;
         player.vehicle = new Object();
