@@ -86,10 +86,14 @@ public final class BridgeTest {
         check(GLFW.mode == 212993, "released cursor must restore normal system cursor");
 
         Mouse.wheelState = 1;
+        Bridge.captureMouseWheel();
+        Mouse.wheelState = 0;
         Bridge.pollThirdPersonZoom();
         check(Bridge.adjustThirdPersonBoom(5.0f) < 5.0f,
                 "mouse wheel up must move the third-person camera closer");
         Mouse.wheelState = -2;
+        Bridge.captureMouseWheel();
+        Mouse.wheelState = 0;
         Bridge.pollThirdPersonZoom();
         check(Bridge.adjustThirdPersonBoom(5.0f) > 5.0f,
                 "mouse wheel down must move the third-person camera farther away");
@@ -99,6 +103,8 @@ public final class BridgeTest {
         GameKeyboard.down.add(56);
         Bridge.applyCursorOverride();
         Mouse.wheelState = 1;
+        Bridge.captureMouseWheel();
+        Mouse.wheelState = 0;
         Bridge.pollThirdPersonZoom();
         check(Bridge.adjustThirdPersonBoom(5.0f) == zoomBeforeFreeCursor,
                 "free cursor must not consume third-person camera zoom");

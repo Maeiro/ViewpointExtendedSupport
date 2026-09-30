@@ -29,6 +29,7 @@ public final class Bridge {
     private static volatile boolean debugLogging = true;
     private static volatile boolean thirdPersonScrollZoom = true;
     private static volatile float thirdPersonZoomOffset;
+    private static volatile int pendingMouseWheel;
     private static volatile boolean autoCursorRequested;
     private static volatile boolean forcedCursor;
     private static volatile boolean lootCursorRequested;
@@ -132,12 +133,12 @@ public final class Bridge {
     }
 
     public static void pollThirdPersonZoom() {
-        if (!thirdPersonScrollZoom || !isViewEnabled() || !isThirdPerson() || isFreeCursor()) {
+        int wheel = pendingMouseWheel;
+        pendingMouseWheel = 0;
+        if (wheel == 0) {
             return;
         }
-
-        int wheel = readMouseWheelState();
-        if (wheel == 0) {
+        if (!thirdPersonScrollZoom || !isViewEnabled() || !isThirdPerson() || isFreeCursor()) {
             return;
         }
 
@@ -148,6 +149,14 @@ public final class Bridge {
         if (debugLogging && previous != next) {
             System.out.println("[Viewpoint Extended Support] third-person camera zoom: offset=" + next);
         }
+    }
+
+    public static void captureMouseWheel() {
+        int wheel = readMouseWheelState();
+        if (wheel == 0) {
+            return;
+        }
+        pendingMouseWheel = clampWheel(pendingMouseWheel + wheel);
     }
 
     public static float adjustThirdPersonBoom(float original) {
@@ -407,6 +416,10 @@ public final class Bridge {
 
     private static float clamp(float value, float minimum, float maximum) {
         return Math.max(minimum, Math.min(maximum, value));
+    }
+
+    private static int clampWheel(int value) {
+        return Math.max(-20, Math.min(20, value));
     }
 
     private static void eat(int key) {

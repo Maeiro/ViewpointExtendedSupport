@@ -30,6 +30,14 @@ public final class Patches {
         }
     }
 
+    @Patch(className = "viewpoint.Hooks", methodName = "mouseUpdated", warmUp = true)
+    public static class MouseUpdated {
+        @Patch.OnEnter
+        public static void enter() {
+            Bridge.captureMouseWheel();
+        }
+    }
+
     @Patch(className = "viewpoint.FP", methodName = "cursorMode", warmUp = true)
     public static class CursorMode {
         @Patch.OnExit
