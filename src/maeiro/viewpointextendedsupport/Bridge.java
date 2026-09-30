@@ -138,10 +138,18 @@ public final class Bridge {
         if (wheel == 0) {
             return;
         }
-        if (!thirdPersonScrollZoom || !isViewEnabled() || !isThirdPerson() || isFreeCursor()) {
+        if (!canApplyThirdPersonZoom()) {
             return;
         }
 
+        applyThirdPersonZoom(wheel);
+    }
+
+    private static boolean canApplyThirdPersonZoom() {
+        return thirdPersonScrollZoom && isViewEnabled() && isThirdPerson() && !isFreeCursor();
+    }
+
+    private static void applyThirdPersonZoom(int wheel) {
         float previous = thirdPersonZoomOffset;
         float next = clamp(previous - (wheel * THIRD_PERSON_ZOOM_STEP),
                 THIRD_PERSON_ZOOM_MIN, THIRD_PERSON_ZOOM_MAX);
@@ -156,9 +164,13 @@ public final class Bridge {
         if (wheel == 0) {
             return;
         }
-        pendingMouseWheel = clampWheel(pendingMouseWheel + wheel);
         if (debugLogging) {
             System.out.println("[Viewpoint Extended Support] mouse wheel captured: delta=" + wheel);
+        }
+        if (canApplyThirdPersonZoom()) {
+            applyThirdPersonZoom(wheel);
+        } else {
+            pendingMouseWheel = clampWheel(pendingMouseWheel + wheel);
         }
     }
 
