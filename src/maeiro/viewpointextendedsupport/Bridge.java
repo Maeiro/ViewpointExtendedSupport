@@ -324,6 +324,12 @@ public final class Bridge {
 
     public static void applyCursorOverride() {
         if (!holdFreeCursor && !autoCursorInUi) {
+            autoCursorRequested = false;
+            lootCursorRequested = false;
+            if (forcedCursor) {
+                setCursorMode(false);
+                forcedCursor = false;
+            }
             return;
         }
 

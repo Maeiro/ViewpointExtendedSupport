@@ -85,6 +85,15 @@ public final class BridgeTest {
         check(!Bridge.overrideMouseCursorUpdate(false), "released cursor must allow normal update");
         check(GLFW.mode == 212993, "released cursor must restore normal system cursor");
 
+        Bridge.configure(70, 71, false, false, 56, true, 72, true);
+        Bridge.setAutoCursorRequested(true);
+        Bridge.applyCursorOverride();
+        check(Bridge.isFreeCursor(), "UI option must enable the free cursor by default");
+        Bridge.configure(70, 71, false, false, 56, false, 72, true);
+        Bridge.applyCursorOverride();
+        check(!Bridge.isFreeCursor(), "disabling automatic UI cursor must release the free cursor");
+        Bridge.configure(70, 71, false, true, 56, true, 72, true);
+
         Mouse.wheelState = 1;
         Bridge.captureMouseWheel();
         Mouse.wheelState = 0;

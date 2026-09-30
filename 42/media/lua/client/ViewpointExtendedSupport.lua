@@ -11,7 +11,7 @@ if PZAPI and PZAPI.ModOptions then
     options.viewModeKey = modOptions:addKeyBind("ViewModeToggleKey", "Toggle first/third-person mode", keyOrFallback("KEY_NONE", 0))
     options.holdCursor = modOptions:addTickBox("HoldFreeCursor", "Hold a key to use free mouse", false)
     options.cursorKey = modOptions:addKeyBind("FreeCursorKey", "Free mouse hold key", keyOrFallback("KEY_LALT", 56))
-    options.autoUi = modOptions:addTickBox("AutoFreeCursorInUI", "Enable free mouse in inventory and UI windows", true)
+    options.autoUi = modOptions:addTickBox("AutoFreeCursorInUI", "Automatically use free mouse in inventories and menus", true)
     options.ergonomicUi = modOptions:addTickBox("ErgonomicUIIntegration", "Integrate with Ergonomic UI", true)
     options.vehicleCamera = modOptions:addTickBox("ThirdPersonInVehicles", "Use third person in vehicles", true)
     options.thirdPersonScrollZoom = modOptions:addTickBox("ThirdPersonScrollZoom", "Zoom third-person camera with mouse wheel", true)
