@@ -1,8 +1,8 @@
 name=Viewpoint Extended Support
 id=ViewpointExtendedSupport
 author=Maeiro
-description=Configurable vehicle camera switching, third-person camera zoom, key rebinding, hold-to-free-cursor mode, and UI cursor support for Viewpoint.
-modversion=0.2.0
+description=Configurable vehicle camera switching, third-person camera zoom, key rebinding, hold-to-free-cursor mode, UI cursor support, and firearm reticle support for Viewpoint.
+modversion=0.3.0
 versionMin=42.20
 require=\ZombieBuddy,\Viewpoint
 ZBVersionMin=2.3.0
