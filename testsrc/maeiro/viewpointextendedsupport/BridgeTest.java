@@ -64,6 +64,12 @@ public final class BridgeTest {
         check(!Bridge.overrideMouseCursorVisibility(true), "captured Viewpoint mode must hide custom cursor texture");
         check(!Bridge.shouldSkipVanillaReticle(false), "captured mode must keep vanilla reticle");
         check(!Bridge.shouldSkipViewpointReticle(false), "captured Viewpoint reticle must remain available");
+        check(Bridge.shouldSkipViewpointCrosshair(), "the Viewpoint center pixel must be replaced by the native reticle");
+
+        ReticleShader shader = new ReticleShader();
+        Bridge.centerIsoReticle(shader);
+        check(shader.screenX == 640 && shader.screenY == 360,
+                "the native reticle must be centered in the viewport");
 
         zombie.core.Core core = zombie.core.Core.getInstance();
         check(core.showReticleTexture, "Viewpoint must preserve the vanilla reticle texture");
@@ -81,6 +87,16 @@ public final class BridgeTest {
         Bridge.adjustViewpointMuzzleDirection(direction);
         check(direction.x > 0.8f && direction.z < -0.4f,
                 "looking down must pitch the muzzle down");
+
+        Look.yaw = 0.0f;
+        Look.pitch = -0.3f;
+        FakeBallisticsController controller = new FakeBallisticsController();
+        Vector3 proneTarget = new Vector3(2.0f, 0.0f, 1.0f - (float) Math.tan(0.3f) * 2.0f);
+        check(Bridge.acceptViewpointBallisticsTarget(false, controller, 0.1f, proneTarget),
+                "a target on the 3D Viewpoint aim ray must remain hittable");
+        check(!Bridge.acceptViewpointBallisticsTarget(false, controller, 0.1f,
+                        new Vector3(2.0f, 0.8f, proneTarget.z)),
+                "a target outside the 3D Viewpoint aim ray must remain rejected");
 
         IsoCamera.Character player = (IsoCamera.Character) IsoCamera.character;
         player.vehicle = new Object();
@@ -152,6 +168,17 @@ public final class BridgeTest {
 
     private static void check(boolean condition, String message) {
         if (!condition) throw new AssertionError(message);
+    }
+
+    private static final class ReticleShader {
+        private int screenX;
+        private int screenY;
+    }
+
+    private static final class FakeBallisticsController {
+        public Vector3 getMuzzlePosition() {
+            return new Vector3(0.0f, 0.0f, 1.0f);
+        }
     }
 
 }

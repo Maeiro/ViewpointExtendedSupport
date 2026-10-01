@@ -87,6 +87,23 @@ public final class Patches {
         }
     }
 
+    @Patch(className = "viewpoint.SceneDrawer", methodName = "drawCrosshair", warmUp = true)
+    public static class ViewpointCrosshair {
+        @Patch.OnEnter(skipOn = true)
+        public static boolean enter() {
+            return Bridge.shouldSkipViewpointCrosshair();
+        }
+    }
+
+    @Patch(className = "zombie.iso.sprite.IsoReticle$IsoReticleShader",
+            methodName = "accept", warmUp = true)
+    public static class CenterIsoReticle {
+        @Patch.OnEnter
+        public static void enter(@Patch.This(readOnly = true) Object shader) {
+            Bridge.centerIsoReticle(shader);
+        }
+    }
+
     @Patch(className = "zombie.core.physics.BallisticsController",
             methodName = "calculateMuzzlePosition", warmUp = true)
     public static class ViewpointMuzzleDirection {
@@ -101,6 +118,18 @@ public final class Patches {
         @Patch.OnExit
         public static void exit(@Patch.This(readOnly = true) Object player) {
             Bridge.syncViewpointAimPitch(player);
+        }
+    }
+
+    @Patch(className = "zombie.CombatManager",
+            methodName = "isHittableBallisticsTarget", warmUp = true)
+    public static class ViewpointBallisticsTarget {
+        @Patch.OnExit
+        public static void exit(@Patch.Return(readOnly = false) boolean result,
+                                @Patch.Argument(value = 0, readOnly = true) Object controller,
+                                @Patch.Argument(value = 1, readOnly = true) float tolerance,
+                                @Patch.Argument(value = 2, readOnly = true) Vector3 target) {
+            result = Bridge.acceptViewpointBallisticsTarget(result, controller, tolerance, target);
         }
     }
 

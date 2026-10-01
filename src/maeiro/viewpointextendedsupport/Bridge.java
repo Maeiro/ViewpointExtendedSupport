@@ -51,6 +51,13 @@ public final class Bridge {
     private static volatile Method getMouseWheelState;
     private static volatile Method isAimingMethod;
     private static volatile Method setTargetAimPitchMethod;
+    private static volatile Field isoReticleScreenX;
+    private static volatile Field isoReticleScreenY;
+    private static volatile Class<?> isoReticleShaderClass;
+    private static volatile Method getScreenWidth;
+    private static volatile Method getScreenHeight;
+    private static volatile Method getMuzzlePosition;
+    private static volatile Class<?> ballisticsMethodClass;
     private static volatile Class<?> vehicleMethodClass;
     private static volatile Class<?> aimMethodClass;
     private static volatile Method getDisplayWindow;
@@ -230,6 +237,46 @@ public final class Bridge {
         return shouldSkipReticle(original);
     }
 
+    public static boolean shouldSkipViewpointCrosshair() {
+        return isViewEnabled();
+    }
+
+    public static void centerIsoReticle(Object shader) {
+        if (shader == null || !isViewEnabled() || isFreeCursor() || isThirdPersonVehicle()) {
+            return;
+        }
+
+        try {
+            if (isoReticleShaderClass != shader.getClass()) {
+                isoReticleShaderClass = shader.getClass();
+                isoReticleScreenX = field(shader.getClass().getName(), "screenX");
+                isoReticleScreenY = field(shader.getClass().getName(), "screenY");
+            }
+            if (isoReticleScreenX == null || isoReticleScreenY == null) {
+                return;
+            }
+
+            if (getScreenWidth == null) {
+                getScreenWidth = method("zombie.iso.IsoCamera", "getScreenWidth", int.class);
+            }
+            if (getScreenHeight == null) {
+                getScreenHeight = method("zombie.iso.IsoCamera", "getScreenHeight", int.class);
+            }
+            if (getScreenWidth == null || getScreenHeight == null) {
+                return;
+            }
+
+            int width = ((Number) getScreenWidth.invoke(null, 0)).intValue();
+            int height = ((Number) getScreenHeight.invoke(null, 0)).intValue();
+            if (width <= 0 || height <= 0) {
+                return;
+            }
+            isoReticleScreenX.setInt(shader, width / 2);
+            isoReticleScreenY.setInt(shader, height / 2);
+        } catch (Throwable ignored) {
+        }
+    }
+
     public static void adjustViewpointMuzzleDirection(Vector3 direction) {
         if (direction == null || !isViewEnabled() || isFreeCursor() || isThirdPersonVehicle()) {
             return;
@@ -250,6 +297,55 @@ public final class Bridge {
                 direction.x / horizontalLength * horizontalScale,
                 direction.y / horizontalLength * horizontalScale,
                 (float) Math.sin(pitch));
+    }
+
+    public static boolean acceptViewpointBallisticsTarget(boolean original,
+                                                          Object controller,
+                                                          float tolerance,
+                                                          Vector3 target) {
+        if (original || controller == null || target == null
+                || !isViewEnabled() || isFreeCursor() || isThirdPersonVehicle()) {
+            return original;
+        }
+
+        try {
+            if (ballisticsMethodClass != controller.getClass()
+                    || getMuzzlePosition == null) {
+                getMuzzlePosition = controller.getClass().getMethod("getMuzzlePosition");
+                getMuzzlePosition.setAccessible(true);
+                ballisticsMethodClass = controller.getClass();
+            }
+
+            Vector3 origin = (Vector3) getMuzzlePosition.invoke(controller);
+            if (origin == null) {
+                return original;
+            }
+
+            float yaw = getViewpointYaw();
+            float pitch = getViewpointPitch();
+            float horizontalScale = (float) Math.cos(pitch);
+            float directionX = (float) Math.cos(yaw) * horizontalScale;
+            float directionY = (float) Math.sin(yaw) * horizontalScale;
+            float directionZ = (float) Math.sin(pitch);
+
+            float deltaX = target.x - origin.x;
+            float deltaY = target.y - origin.y;
+            float deltaZ = target.z - origin.z;
+            float along = deltaX * directionX + deltaY * directionY + deltaZ * directionZ;
+            if (along <= 0.0f) {
+                return original;
+            }
+
+            float perpendicularX = deltaX - directionX * along;
+            float perpendicularY = deltaY - directionY * along;
+            float perpendicularZ = deltaZ - directionZ * along;
+            float radius = Math.max(0.65f, tolerance);
+            return perpendicularX * perpendicularX
+                    + perpendicularY * perpendicularY
+                    + perpendicularZ * perpendicularZ <= radius * radius;
+        } catch (Throwable ignored) {
+            return original;
+        }
     }
 
     public static void syncViewpointAimPitch(Object player) {
