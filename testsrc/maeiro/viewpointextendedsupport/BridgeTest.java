@@ -88,15 +88,46 @@ public final class BridgeTest {
         check(direction.x > 0.8f && direction.z < -0.4f,
                 "looking down must pitch the muzzle down");
 
-        Look.yaw = 0.0f;
+        Vector3 cameraOrigin = new Vector3(0.0f, 0.0f, 1.6f);
+        Vector3 cameraDirection = new Vector3(1.0f, 0.0f, -0.35f);
+        cameraDirection.normalize();
+        Vector3 endpoint = new Vector3(cameraOrigin.x + cameraDirection.x * 8.0f,
+                cameraOrigin.y + cameraDirection.y * 8.0f,
+                cameraOrigin.z + cameraDirection.z * 8.0f);
+        Vector3 muzzlePosition = new Vector3(0.4f, 0.0f, 1.2f);
+        Vector3 muzzleDirection = new Vector3(1.0f, 0.0f, 0.0f);
+        Bridge.applyPz3dMuzzleCorrection(cameraOrigin, cameraDirection, endpoint,
+                muzzlePosition, muzzleDirection, false);
+        check(muzzleDirection.z < -0.3f,
+                "first-person muzzle direction must follow the camera below the horizon");
+        check(Math.abs(muzzlePosition.y) < 0.001f
+                        && muzzlePosition.z < 1.6f
+                        && muzzlePosition.x > 0.0f,
+                "first-person muzzle origin must be centered on the camera ray");
+
+        muzzlePosition.set(0.0f, 0.0f, 1.0f);
+        muzzleDirection.set(1.0f, 0.0f, 0.0f);
+        Bridge.applyPz3dMuzzleCorrection(cameraOrigin, cameraDirection, endpoint,
+                muzzlePosition, muzzleDirection, true);
+        check(muzzleDirection.z < -0.2f,
+                "third-person muzzle direction must point from the muzzle to the camera target");
+
+        IsoCamera.Character originalCamera = (IsoCamera.Character) IsoCamera.character;
+        FakeCharacter character = new FakeCharacter();
+        FakeBallisticsController controller = new FakeBallisticsController(character);
+        IsoCamera.character = character;
+        ThirdPerson.active = false;
+        muzzlePosition.set(0.0f, 0.0f, 1.0f);
+        muzzleDirection.set(1.0f, 0.0f, 0.0f);
         Look.pitch = -0.3f;
-        FakeBallisticsController controller = new FakeBallisticsController();
-        Vector3 proneTarget = new Vector3(2.0f, 0.0f, 1.0f - (float) Math.tan(0.3f) * 2.0f);
-        check(Bridge.acceptViewpointBallisticsTarget(false, controller, 0.1f, proneTarget),
-                "a target on the 3D Viewpoint aim ray must remain hittable");
-        check(!Bridge.acceptViewpointBallisticsTarget(false, controller, 0.1f,
-                        new Vector3(2.0f, 0.8f, proneTarget.z)),
-                "a target outside the 3D Viewpoint aim ray must remain rejected");
+        Bridge.adjustViewpointMuzzle(controller, muzzlePosition, muzzleDirection);
+        check(muzzleDirection.z < -0.2f,
+                "ballistics hook must mutate the live muzzle direction");
+        check(controller.isoAimingPosition.x == 4.0f
+                        && controller.isoAimingPosition.z == 0.0f,
+                "ballistics hook must use the native camera target as the 3D aim position");
+        IsoCamera.character = originalCamera;
+        ThirdPerson.active = true;
 
         IsoCamera.Character player = (IsoCamera.Character) IsoCamera.character;
         player.vehicle = new Object();
@@ -176,8 +207,57 @@ public final class BridgeTest {
     }
 
     private static final class FakeBallisticsController {
+        private final FakeCharacter isoGameCharacter;
+        private final Vector3 muzzlePosition = new Vector3(0.0f, 0.0f, 1.0f);
+        private final Vector3 isoAimingPosition = new Vector3();
+        private final float[] cameraTargets = new float[5];
+
+        private FakeBallisticsController(FakeCharacter character) {
+            isoGameCharacter = character;
+            cameraTargets[1] = 4.0f;
+            cameraTargets[2] = 0.0f;
+            cameraTargets[3] = 0.0f;
+        }
+
+        public int getID() {
+            return 1;
+        }
+
         public Vector3 getMuzzlePosition() {
-            return new Vector3(0.0f, 0.0f, 1.0f);
+            return muzzlePosition;
+        }
+
+        public Vector3 getIsoAimingPosition() {
+            return isoAimingPosition;
+        }
+
+        public void getCameraTargets(float range, boolean includeCharacters) {
+        }
+
+        public int getNumberOfCameraTargets() {
+            return 1;
+        }
+
+        public float[] getCameraTargets() {
+            return cameraTargets;
+        }
+    }
+
+    private static final class FakeCharacter {
+        private final FakeWeapon weapon = new FakeWeapon();
+
+        public FakeWeapon getAttackingWeapon() {
+            return weapon;
+        }
+    }
+
+    private static final class FakeWeapon {
+        public boolean isRanged() {
+            return true;
+        }
+
+        public float getMaxRange(FakeCharacter character) {
+            return 8.0f;
         }
     }
 

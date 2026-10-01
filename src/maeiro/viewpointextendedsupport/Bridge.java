@@ -19,6 +19,8 @@ public final class Bridge {
     private static final float THIRD_PERSON_ZOOM_MIN = -2.0f;
     private static final float THIRD_PERSON_ZOOM_MAX = 8.0f;
     private static final float THIRD_PERSON_BOOM_MIN = 0.5f;
+    private static final float VIEWPOINT_VERTICAL_SCALE = 2.4494896f;
+    private static final float DEFAULT_FIREARM_RANGE = 8.0f;
 
     private static volatile int firstPersonKey = VIEWPOINT_TOGGLE_KEY;
     private static volatile int thirdPersonKey = VIEWPOINT_TOGGLE_KEY;
@@ -58,6 +60,46 @@ public final class Bridge {
     private static volatile Method getScreenHeight;
     private static volatile Method getMuzzlePosition;
     private static volatile Class<?> ballisticsMethodClass;
+    private static volatile Field controllerCharacter;
+    private static volatile Class<?> controllerClass;
+    private static volatile Method getControllerId;
+    private static volatile Method getIsoAimingPosition;
+    private static volatile Method getCameraTargets;
+    private static volatile Method getNumberOfCameraTargets;
+    private static volatile Method getCameraTargetsArray;
+    private static volatile Field viewpointFrames;
+    private static volatile Field frameCamX;
+    private static volatile Field frameCamY;
+    private static volatile Field frameCamZ;
+    private static volatile Field frameEyeX;
+    private static volatile Field frameEyeY;
+    private static volatile Field frameEyeZ;
+    private static volatile Field spriteRendererInstance;
+    private static volatile Method getMainStateIndex;
+    private static volatile Method getAttackingWeapon;
+    private static volatile Method getPrimaryHandItem;
+    private static volatile Method getMaxRangeWithCharacter;
+    private static volatile Method getMaxRangeWithoutCharacter;
+    private static volatile Class<?> weaponClass;
+    private static volatile Method bulletReticlePosition;
+    private static volatile Method bulletReticleQuaternion;
+    private static volatile Class<?> bulletClass;
+    private static volatile Class<?> jomlVectorClass;
+    private static volatile Class<?> jomlQuaternionClass;
+    private static volatile Method jomlLookAlong;
+    private static volatile Method jomlConjugate;
+    private static volatile java.lang.reflect.Constructor<?> jomlVectorConstructor;
+    private static volatile java.lang.reflect.Constructor<?> jomlQuaternionConstructor;
+    private static volatile Field jomlQuaternionX;
+    private static volatile Field jomlQuaternionY;
+    private static volatile Field jomlQuaternionZ;
+    private static volatile Field jomlQuaternionW;
+    private static volatile Object lastBallisticsController;
+    private static final Vector3 cameraOrigin = new Vector3();
+    private static final Vector3 cameraDirection = new Vector3();
+    private static final Vector3 cameraEndpoint = new Vector3();
+    private static final Vector3 cameraTarget = new Vector3();
+    private static final Vector3 centeredMuzzle = new Vector3();
     private static volatile Class<?> vehicleMethodClass;
     private static volatile Class<?> aimMethodClass;
     private static volatile Method getDisplayWindow;
@@ -73,6 +115,9 @@ public final class Bridge {
     private static volatile long mouseCursorTextureHookCalls;
     private static volatile long mouseCursorVisibilityHookCalls;
     private static volatile long directCursorRenderSkippedCalls;
+    private static volatile long ballisticsMuzzleHookCalls;
+    private static volatile long ballisticsCameraHookCalls;
+    private static volatile long ballisticsCameraTargetCount;
     private static volatile long diagnosticTicks;
     private static volatile boolean diagnosticStateInitialized;
     private static volatile boolean diagnosticViewEnabled;
@@ -133,6 +178,9 @@ public final class Bridge {
                 + ", cursorTexture=" + mouseCursorTextureHookCalls
                 + ", cursorVisibility=" + mouseCursorVisibilityHookCalls
                 + ", directCursorSkipped=" + directCursorRenderSkippedCalls
+                + ", ballisticsMuzzle=" + ballisticsMuzzleHookCalls
+                + ", ballisticsCamera=" + ballisticsCameraHookCalls
+                + ", ballisticsTargets=" + ballisticsCameraTargetCount
                 + ", view=" + isViewEnabled()
                 + ", free=" + isFreeCursor()
                 + ", auto=" + autoCursorRequested
@@ -282,69 +330,442 @@ public final class Bridge {
             return;
         }
 
-        float horizontalLength = (float) Math.sqrt(
-                direction.x * direction.x + direction.y * direction.y);
+        setViewpointAimDirection(direction, direction);
+    }
+
+    public static void adjustViewpointMuzzle(Object controller,
+                                              Vector3 muzzlePosition,
+                                              Vector3 direction) {
+        if (controller == null || muzzlePosition == null || direction == null
+                || !isViewEnabled() || isFreeCursor() || isThirdPersonVehicle()
+                || !isViewpointFirearmController(controller)) {
+            return;
+        }
+
+        try {
+            ballisticsMuzzleHookCalls++;
+            if (debugLogging && ballisticsMuzzleHookCalls == 1L) {
+                System.out.println("[Viewpoint Extended Support] PZ3D-style ballistics hook active");
+            }
+            setViewpointAimDirection(direction, cameraDirection);
+            readViewpointCameraOrigin(muzzlePosition, cameraOrigin);
+
+            float range = getFirearmRange(controller);
+            float cameraDistance = range + distance(cameraOrigin, muzzlePosition);
+            setEndpoint(cameraOrigin, cameraDirection, cameraDistance, cameraEndpoint);
+            updateBulletAim(controller, cameraOrigin, cameraDirection);
+            selectCameraTarget(controller, cameraDistance, cameraEndpoint);
+
+            applyPz3dMuzzleCorrection(cameraOrigin, cameraDirection, cameraEndpoint,
+                    muzzlePosition, direction, isThirdPerson());
+            setIsoAimingPosition(controller, cameraEndpoint);
+            lastBallisticsController = controller;
+        } catch (Throwable ignored) {
+        }
+    }
+
+    public static void syncViewpointBallisticsCamera(Object controller) {
+        if (controller == null || !isViewEnabled() || isFreeCursor()
+                || isThirdPersonVehicle() || !isViewpointFirearmController(controller)) {
+            return;
+        }
+
+        try {
+            ballisticsCameraHookCalls++;
+            if (getMuzzlePosition == null || ballisticsMethodClass != controller.getClass()) {
+                getMuzzlePosition = publicMethod(controller.getClass(), "getMuzzlePosition");
+                ballisticsMethodClass = controller.getClass();
+            }
+            if (getMuzzlePosition == null) {
+                return;
+            }
+
+            Vector3 muzzlePosition = (Vector3) getMuzzlePosition.invoke(controller);
+            if (muzzlePosition == null) {
+                return;
+            }
+
+            readViewpointCameraOrigin(muzzlePosition, cameraOrigin);
+            setViewpointAimDirection(muzzlePosition, cameraDirection);
+            updateBulletAim(controller, cameraOrigin, cameraDirection);
+
+            if (lastBallisticsController == controller) {
+                setIsoAimingPosition(controller, cameraEndpoint);
+            }
+        } catch (Throwable ignored) {
+        }
+    }
+
+    static void applyPz3dMuzzleCorrection(Vector3 cameraOrigin,
+                                           Vector3 cameraDirection,
+                                           Vector3 endpoint,
+                                           Vector3 muzzlePosition,
+                                           Vector3 muzzleDirection,
+                                           boolean thirdPerson) {
+        if (thirdPerson) {
+            setDirectionFromTo(muzzlePosition, endpoint, muzzleDirection);
+            return;
+        }
+
+        centeredOrigin(cameraOrigin, cameraDirection, endpoint, muzzlePosition, centeredMuzzle);
+        muzzlePosition.set(centeredMuzzle.x, centeredMuzzle.y, centeredMuzzle.z);
+        muzzleDirection.set(cameraDirection.x, cameraDirection.y, cameraDirection.z);
+        normalize(muzzleDirection);
+    }
+
+    static void centeredOrigin(Vector3 cameraOrigin,
+                               Vector3 cameraDirection,
+                               Vector3 endpoint,
+                               Vector3 muzzlePosition,
+                               Vector3 result) {
+        float muzzleAlong = dot(muzzlePosition.x - cameraOrigin.x,
+                muzzlePosition.y - cameraOrigin.y,
+                muzzlePosition.z - cameraOrigin.z,
+                cameraDirection);
+        float endpointAlong = dot(endpoint.x - cameraOrigin.x,
+                endpoint.y - cameraOrigin.y,
+                endpoint.z - cameraOrigin.z,
+                cameraDirection);
+        float along = clamp(muzzleAlong, 0.0f, endpointAlong - 0.01f);
+        result.set(cameraOrigin.x + cameraDirection.x * along,
+                cameraOrigin.y + cameraDirection.y * along,
+                cameraOrigin.z + cameraDirection.z * along);
+    }
+
+    private static void setViewpointAimDirection(Vector3 source, Vector3 result) {
+        float horizontalLength = (float) Math.sqrt(source.x * source.x + source.y * source.y);
         if (horizontalLength <= 0.0001f) {
             float yaw = getViewpointYaw();
-            direction.x = (float) Math.cos(yaw);
-            direction.y = (float) Math.sin(yaw);
+            result.x = (float) Math.cos(yaw);
+            result.y = (float) Math.sin(yaw);
             horizontalLength = 1.0f;
+        } else if (source != result) {
+            result.x = source.x / horizontalLength;
+            result.y = source.y / horizontalLength;
+        } else {
+            result.x /= horizontalLength;
+            result.y /= horizontalLength;
         }
 
         float pitch = getViewpointPitch();
         float horizontalScale = (float) Math.cos(pitch);
-        direction.set(
-                direction.x / horizontalLength * horizontalScale,
-                direction.y / horizontalLength * horizontalScale,
-                (float) Math.sin(pitch));
+        result.x *= horizontalScale;
+        result.y *= horizontalScale;
+        result.z = (float) Math.sin(pitch);
+        normalize(result);
     }
 
-    public static boolean acceptViewpointBallisticsTarget(boolean original,
-                                                          Object controller,
-                                                          float tolerance,
-                                                          Vector3 target) {
-        if (original || controller == null || target == null
-                || !isViewEnabled() || isFreeCursor() || isThirdPersonVehicle()) {
-            return original;
-        }
-
+    private static void readViewpointCameraOrigin(Vector3 fallback, Vector3 result) {
         try {
-            if (ballisticsMethodClass != controller.getClass()
-                    || getMuzzlePosition == null) {
-                getMuzzlePosition = controller.getClass().getMethod("getMuzzlePosition");
-                getMuzzlePosition.setAccessible(true);
-                ballisticsMethodClass = controller.getClass();
+            if (viewpointFrames == null) {
+                viewpointFrames = field("viewpoint.FP", "frames");
+            }
+            if (viewpointFrames == null) {
+                result.set(fallback.x, fallback.y, fallback.z);
+                return;
             }
 
-            Vector3 origin = (Vector3) getMuzzlePosition.invoke(controller);
-            if (origin == null) {
-                return original;
+            Object frames = viewpointFrames.get(null);
+            if (frames == null || !frames.getClass().isArray()
+                    || java.lang.reflect.Array.getLength(frames) == 0) {
+                result.set(fallback.x, fallback.y, fallback.z);
+                return;
             }
 
-            float yaw = getViewpointYaw();
-            float pitch = getViewpointPitch();
-            float horizontalScale = (float) Math.cos(pitch);
-            float directionX = (float) Math.cos(yaw) * horizontalScale;
-            float directionY = (float) Math.sin(yaw) * horizontalScale;
-            float directionZ = (float) Math.sin(pitch);
-
-            float deltaX = target.x - origin.x;
-            float deltaY = target.y - origin.y;
-            float deltaZ = target.z - origin.z;
-            float along = deltaX * directionX + deltaY * directionY + deltaZ * directionZ;
-            if (along <= 0.0f) {
-                return original;
+            int index = 0;
+            Object renderer = getSpriteRendererInstance();
+            if (renderer != null) {
+                if (getMainStateIndex == null) {
+                    getMainStateIndex = publicMethod(renderer.getClass(), "getMainStateIndex");
+                }
+                if (getMainStateIndex != null) {
+                    index = ((Number) getMainStateIndex.invoke(renderer)).intValue();
+                }
+            }
+            index = Math.max(0, Math.min(index, java.lang.reflect.Array.getLength(frames) - 1));
+            Object frame = java.lang.reflect.Array.get(frames, index);
+            if (frame == null) {
+                result.set(fallback.x, fallback.y, fallback.z);
+                return;
             }
 
-            float perpendicularX = deltaX - directionX * along;
-            float perpendicularY = deltaY - directionY * along;
-            float perpendicularZ = deltaZ - directionZ * along;
-            float radius = Math.max(0.65f, tolerance);
-            return perpendicularX * perpendicularX
-                    + perpendicularY * perpendicularY
-                    + perpendicularZ * perpendicularZ <= radius * radius;
+            if (frameCamX == null) {
+                frameCamX = field(frame.getClass().getName(), "camX");
+                frameCamY = field(frame.getClass().getName(), "camY");
+                frameCamZ = field(frame.getClass().getName(), "camZ");
+                frameEyeX = field(frame.getClass().getName(), "eyeX");
+                frameEyeY = field(frame.getClass().getName(), "eyeY");
+                frameEyeZ = field(frame.getClass().getName(), "eyeZ");
+            }
+            if (frameCamX == null || frameCamY == null || frameCamZ == null
+                    || frameEyeX == null || frameEyeY == null || frameEyeZ == null) {
+                result.set(fallback.x, fallback.y, fallback.z);
+                return;
+            }
+
+            result.set(frameCamX.getFloat(frame) + frameEyeX.getFloat(frame),
+                    frameCamY.getFloat(frame) + frameEyeZ.getFloat(frame),
+                    frameCamZ.getFloat(frame) + frameEyeY.getFloat(frame)
+                            / VIEWPOINT_VERTICAL_SCALE);
         } catch (Throwable ignored) {
-            return original;
+            result.set(fallback.x, fallback.y, fallback.z);
+        }
+    }
+
+    private static boolean isViewpointFirearmController(Object controller) {
+        try {
+            Object character = getControllerCharacter(controller);
+            if (character == null) {
+                return false;
+            }
+
+            Object cameraCharacter = callObject("zombie.iso.IsoCamera", "getCameraCharacter");
+            if (cameraCharacter != null && cameraCharacter != character) {
+                return false;
+            }
+
+            Object weapon = getCharacterWeapon(character);
+            if (weapon == null) {
+                return false;
+            }
+            Method ranged = publicMethod(weapon.getClass(), "isRanged");
+            return ranged == null || Boolean.TRUE.equals(ranged.invoke(weapon));
+        } catch (Throwable ignored) {
+            return false;
+        }
+    }
+
+    private static Object getControllerCharacter(Object controller) {
+        try {
+            if (controllerClass != controller.getClass()) {
+                controllerClass = controller.getClass();
+                controllerCharacter = field(controller.getClass().getName(), "isoGameCharacter");
+                getControllerId = publicMethod(controller.getClass(), "getID");
+                getIsoAimingPosition = publicMethod(controller.getClass(), "getIsoAimingPosition");
+                getCameraTargets = publicMethod(controller.getClass(), "getCameraTargets",
+                        float.class, boolean.class);
+                getNumberOfCameraTargets = publicMethod(controller.getClass(),
+                        "getNumberOfCameraTargets");
+                getCameraTargetsArray = publicMethod(controller.getClass(), "getCameraTargets");
+            }
+            return controllerCharacter == null ? null : controllerCharacter.get(controller);
+        } catch (Throwable ignored) {
+            return null;
+        }
+    }
+
+    private static Object getCharacterWeapon(Object character) {
+        try {
+            if (getAttackingWeapon == null) {
+                getAttackingWeapon = publicMethod(character.getClass(), "getAttackingWeapon");
+            }
+            Object weapon = getAttackingWeapon == null ? null : getAttackingWeapon.invoke(character);
+            if (weapon == null) {
+                if (getPrimaryHandItem == null) {
+                    getPrimaryHandItem = publicMethod(character.getClass(), "getPrimaryHandItem");
+                }
+                weapon = getPrimaryHandItem == null ? null : getPrimaryHandItem.invoke(character);
+            }
+            return weapon;
+        } catch (Throwable ignored) {
+            return null;
+        }
+    }
+
+    private static float getFirearmRange(Object controller) {
+        try {
+            Object character = getControllerCharacter(controller);
+            Object weapon = character == null ? null : getCharacterWeapon(character);
+            if (weapon == null) {
+                return DEFAULT_FIREARM_RANGE;
+            }
+
+            if (weaponClass != weapon.getClass()) {
+                weaponClass = weapon.getClass();
+                getMaxRangeWithCharacter = null;
+                getMaxRangeWithoutCharacter = null;
+                for (Method candidate : weapon.getClass().getMethods()) {
+                    if (!candidate.getName().equals("getMaxRange")) {
+                        continue;
+                    }
+                    candidate.setAccessible(true);
+                    if (candidate.getParameterCount() == 1) {
+                        getMaxRangeWithCharacter = candidate;
+                    } else if (candidate.getParameterCount() == 0) {
+                        getMaxRangeWithoutCharacter = candidate;
+                    }
+                }
+            }
+
+            Number value = null;
+            if (getMaxRangeWithCharacter != null) {
+                value = (Number) getMaxRangeWithCharacter.invoke(weapon, character);
+            } else if (getMaxRangeWithoutCharacter != null) {
+                value = (Number) getMaxRangeWithoutCharacter.invoke(weapon);
+            }
+            float range = value == null ? DEFAULT_FIREARM_RANGE : value.floatValue();
+            return range > 0.0f ? range : DEFAULT_FIREARM_RANGE;
+        } catch (Throwable ignored) {
+            return DEFAULT_FIREARM_RANGE;
+        }
+    }
+
+    private static void selectCameraTarget(Object controller, float maxDistance, Vector3 endpoint) {
+        try {
+            if (getCameraTargets == null || getNumberOfCameraTargets == null
+                    || getCameraTargetsArray == null) {
+                return;
+            }
+
+            getCameraTargets.invoke(controller, maxDistance, true);
+            int count = ((Number) getNumberOfCameraTargets.invoke(controller)).intValue();
+            if (count <= 0) {
+                return;
+            }
+
+            float[] targets = (float[]) getCameraTargetsArray.invoke(controller);
+            if (targets == null || targets.length < 4) {
+                return;
+            }
+
+            Vector3 candidate = cameraTarget;
+            candidate.set(targets[1], targets[3], targets[2] / VIEWPOINT_VERTICAL_SCALE);
+            float along = dot(candidate.x - cameraOrigin.x,
+                    candidate.y - cameraOrigin.y,
+                    candidate.z - cameraOrigin.z,
+                    cameraDirection);
+            if (along > 0.0f) {
+                endpoint.set(candidate.x, candidate.y, candidate.z);
+                ballisticsCameraTargetCount++;
+            }
+        } catch (Throwable ignored) {
+        }
+    }
+
+    private static void setIsoAimingPosition(Object controller, Vector3 endpoint) {
+        try {
+            if (getIsoAimingPosition == null) {
+                return;
+            }
+            Object aimingPosition = getIsoAimingPosition.invoke(controller);
+            if (aimingPosition instanceof Vector3) {
+                ((Vector3) aimingPosition).set(endpoint.x, endpoint.y, endpoint.z);
+            }
+        } catch (Throwable ignored) {
+        }
+    }
+
+    private static void updateBulletAim(Object controller, Vector3 origin, Vector3 direction) {
+        try {
+            if (getControllerId == null) {
+                return;
+            }
+            int id = ((Number) getControllerId.invoke(controller)).intValue();
+            if (bulletClass == null) {
+                bulletClass = Class.forName("zombie.core.physics.Bullet");
+                bulletReticlePosition = publicMethod(bulletClass,
+                        "updateBallisticsAimReticlePosition", int.class,
+                        float.class, float.class, float.class);
+                bulletReticleQuaternion = publicMethod(bulletClass,
+                        "updateBallisticsAimReticleQuaternion", int.class,
+                        float.class, float.class, float.class, float.class);
+            }
+            if (bulletReticlePosition != null) {
+                bulletReticlePosition.invoke(null, id, origin.x, origin.z, origin.y);
+            }
+            updateBulletQuaternion(id, direction);
+        } catch (Throwable ignored) {
+        }
+    }
+
+    private static void updateBulletQuaternion(int id, Vector3 direction) {
+        try {
+            if (bulletReticleQuaternion == null) {
+                return;
+            }
+            if (jomlVectorClass == null) {
+                jomlVectorClass = Class.forName("org.joml.Vector3f");
+                jomlQuaternionClass = Class.forName("org.joml.Quaternionf");
+                jomlVectorConstructor = jomlVectorClass.getConstructor(
+                        float.class, float.class, float.class);
+                jomlQuaternionConstructor = jomlQuaternionClass.getConstructor();
+                for (Method candidate : jomlQuaternionClass.getMethods()) {
+                    if (candidate.getName().equals("lookAlong")
+                            && candidate.getParameterCount() == 2) {
+                        jomlLookAlong = candidate;
+                    } else if (candidate.getName().equals("conjugate")
+                            && candidate.getParameterCount() == 0) {
+                        jomlConjugate = candidate;
+                    }
+                }
+                jomlQuaternionX = jomlQuaternionClass.getField("x");
+                jomlQuaternionY = jomlQuaternionClass.getField("y");
+                jomlQuaternionZ = jomlQuaternionClass.getField("z");
+                jomlQuaternionW = jomlQuaternionClass.getField("w");
+            }
+            if (jomlLookAlong == null || jomlConjugate == null) {
+                return;
+            }
+
+            Object physicalDirection = jomlVectorConstructor.newInstance(
+                    direction.x, direction.z * VIEWPOINT_VERTICAL_SCALE, direction.y);
+            float upX = 0.0f;
+            float upY = Math.abs(direction.z) < 0.999f ? 1.0f : 0.0f;
+            float upZ = Math.abs(direction.z) < 0.999f ? 0.0f : 1.0f;
+            Object up = jomlVectorConstructor.newInstance(upX, upY, upZ);
+            Object quaternion = jomlQuaternionConstructor.newInstance();
+            jomlLookAlong.invoke(quaternion, physicalDirection, up);
+            jomlConjugate.invoke(quaternion);
+            bulletReticleQuaternion.invoke(null, id,
+                    jomlQuaternionX.getFloat(quaternion),
+                    jomlQuaternionY.getFloat(quaternion),
+                    jomlQuaternionZ.getFloat(quaternion),
+                    jomlQuaternionW.getFloat(quaternion));
+        } catch (Throwable ignored) {
+        }
+    }
+
+    private static Object getSpriteRendererInstance() {
+        try {
+            if (spriteRendererInstance == null) {
+                spriteRendererInstance = field("zombie.core.SpriteRenderer", "instance");
+            }
+            return spriteRendererInstance == null ? null : spriteRendererInstance.get(null);
+        } catch (Throwable ignored) {
+            return null;
+        }
+    }
+
+    private static void setEndpoint(Vector3 origin, Vector3 direction,
+                                    float distance, Vector3 endpoint) {
+        endpoint.set(origin.x + direction.x * distance,
+                origin.y + direction.y * distance,
+                origin.z + direction.z * distance);
+    }
+
+    private static void setDirectionFromTo(Vector3 origin, Vector3 endpoint, Vector3 result) {
+        result.set(endpoint.x - origin.x, endpoint.y - origin.y, endpoint.z - origin.z);
+        normalize(result);
+    }
+
+    private static float distance(Vector3 first, Vector3 second) {
+        float x = first.x - second.x;
+        float y = first.y - second.y;
+        float z = first.z - second.z;
+        return (float) Math.sqrt(x * x + y * y + z * z);
+    }
+
+    private static float dot(float x, float y, float z, Vector3 direction) {
+        return x * direction.x + y * direction.y + z * direction.z;
+    }
+
+    private static void normalize(Vector3 vector) {
+        float length = (float) Math.sqrt(vector.x * vector.x
+                + vector.y * vector.y + vector.z * vector.z);
+        if (length > 0.0001f) {
+            vector.x /= length;
+            vector.y /= length;
+            vector.z /= length;
         }
     }
 
@@ -795,6 +1216,16 @@ public final class Bridge {
     private static Method method(String className, String methodName, Class<?>... types) {
         try {
             Method method = Class.forName(className).getDeclaredMethod(methodName, types);
+            method.setAccessible(true);
+            return method;
+        } catch (Throwable ignored) {
+            return null;
+        }
+    }
+
+    private static Method publicMethod(Class<?> type, String methodName, Class<?>... types) {
+        try {
+            Method method = type.getMethod(methodName, types);
             method.setAccessible(true);
             return method;
         } catch (Throwable ignored) {

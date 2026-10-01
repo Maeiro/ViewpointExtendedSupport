@@ -18,4 +18,14 @@ public class Vector3 {
         this.z = z;
         return this;
     }
+
+    public Vector3 normalize() {
+        float length = (float) Math.sqrt(x * x + y * y + z * z);
+        if (length > 0.0001f) {
+            x /= length;
+            y /= length;
+            z /= length;
+        }
+        return this;
+    }
 }

@@ -108,8 +108,19 @@ public final class Patches {
             methodName = "calculateMuzzlePosition", warmUp = true)
     public static class ViewpointMuzzleDirection {
         @Patch.OnExit
-        public static void exit(@Patch.Argument(value = 1, readOnly = true) Vector3 direction) {
-            Bridge.adjustViewpointMuzzleDirection(direction);
+        public static void exit(@Patch.This(readOnly = true) Object controller,
+                                @Patch.Argument(value = 0, readOnly = false) Vector3 muzzlePosition,
+                                @Patch.Argument(value = 1, readOnly = false) Vector3 direction) {
+            Bridge.adjustViewpointMuzzle(controller, muzzlePosition, direction);
+        }
+    }
+
+    @Patch(className = "zombie.core.physics.BallisticsController",
+            methodName = "update", warmUp = true)
+    public static class ViewpointBallisticsCamera {
+        @Patch.OnExit
+        public static void exit(@Patch.This(readOnly = true) Object controller) {
+            Bridge.syncViewpointBallisticsCamera(controller);
         }
     }
 
@@ -118,18 +129,6 @@ public final class Patches {
         @Patch.OnExit
         public static void exit(@Patch.This(readOnly = true) Object player) {
             Bridge.syncViewpointAimPitch(player);
-        }
-    }
-
-    @Patch(className = "zombie.CombatManager",
-            methodName = "isHittableBallisticsTarget", warmUp = true)
-    public static class ViewpointBallisticsTarget {
-        @Patch.OnExit
-        public static void exit(@Patch.Return(readOnly = false) boolean result,
-                                @Patch.Argument(value = 0, readOnly = true) Object controller,
-                                @Patch.Argument(value = 1, readOnly = true) float tolerance,
-                                @Patch.Argument(value = 2, readOnly = true) Vector3 target) {
-            result = Bridge.acceptViewpointBallisticsTarget(result, controller, tolerance, target);
         }
     }
 
