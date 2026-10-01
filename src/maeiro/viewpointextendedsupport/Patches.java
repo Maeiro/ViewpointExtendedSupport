@@ -1,9 +1,6 @@
 package maeiro.viewpointextendedsupport;
 
 import me.zed_0xff.zombie_buddy.Patch;
-import zombie.core.physics.BallisticsController;
-import zombie.iso.Vector2;
-import zombie.iso.Vector3;
 
 public final class Patches {
     private Patches() {
@@ -97,80 +94,19 @@ public final class Patches {
         }
     }
 
-    @Patch(className = "zombie.input.AimingReticle", methodName = "getXA", warmUp = true)
-    public static class ViewpointReticleX {
-        @Patch.OnExit
-        public static void exit(@Patch.Argument(value = 0, readOnly = true) int playerIndex,
-                                @Patch.Return(readOnly = false) int result) {
-            result = Bridge.overrideAimingReticleX(playerIndex, result);
+    @Patch(className = "viewpoint.platform.Onboarding", methodName = "show", warmUp = true)
+    public static class ViewpointSetupWizard {
+        @Patch.OnEnter(skipOn = true)
+        public static boolean enter() {
+            return Bridge.shouldSkipSetupWizard();
         }
     }
 
-    @Patch(className = "zombie.input.AimingReticle", methodName = "getYA", warmUp = true)
-    public static class ViewpointReticleY {
+    @Patch(className = "viewpoint.platform.Onboarding", methodName = "blocks", warmUp = true)
+    public static class ViewpointSetupBlock {
         @Patch.OnExit
-        public static void exit(@Patch.Argument(value = 0, readOnly = true) int playerIndex,
-                                @Patch.Return(readOnly = false) int result) {
-            result = Bridge.overrideAimingReticleY(playerIndex, result);
-        }
-    }
-
-    @Patch(className = "zombie.core.physics.BallisticsController",
-            methodName = "calculateMuzzlePosition", warmUp = true)
-    public static class ViewpointMuzzleDirection {
-        @Patch.OnExit
-        public static void exit(@Patch.This(readOnly = true) Object controller,
-                                @Patch.Argument(value = 0, readOnly = false) Vector3 muzzlePosition,
-                                @Patch.Argument(value = 1, readOnly = false) Vector3 direction) {
-            Bridge.adjustViewpointMuzzle(controller, muzzlePosition, direction);
-        }
-    }
-
-    @Patch(className = "zombie.core.physics.BallisticsController",
-            methodName = "update", warmUp = true)
-    public static class ViewpointBallisticsCamera {
-        @Patch.OnExit
-        public static void exit(@Patch.This(readOnly = true) Object controller) {
-            Bridge.syncViewpointBallisticsCamera(controller);
-        }
-    }
-
-    @Patch(className = "zombie.core.physics.BallisticsController",
-            methodName = "updateAimingVector", warmUp = true)
-    public static class ViewpointBallisticsAimVector {
-        @Patch.OnExit
-        public static void exit(@Patch.This(readOnly = true) Object controller,
-                                @Patch.Argument(value = 1, readOnly = true)
-                                BallisticsController.AimingVectorParameters parameters,
-                                @Patch.Return(readOnly = true) boolean result) {
-            Bridge.stabilizeAimVector(controller, parameters, result);
-        }
-    }
-
-    @Patch(className = "zombie.characters.IsoPlayer",
-            methodName = "calculateAimVector", warmUp = true)
-    public static class ViewpointCalculatedAimVector {
-        @Patch.OnExit
-        public static void exit(@Patch.This(readOnly = true) Object player,
-                                @Patch.Return(readOnly = true) Vector2 result) {
-            Bridge.overrideCalculatedAimVector(player, result);
-        }
-    }
-
-    @Patch(className = "zombie.characters.IsoPlayer", methodName = "getAimVector", warmUp = true)
-    public static class ViewpointAimVector {
-        @Patch.OnExit
-        public static void exit(@Patch.This(readOnly = true) Object player,
-                                @Patch.Return(readOnly = true) Vector2 result) {
-            Bridge.overrideCalculatedAimVector(player, result);
-        }
-    }
-
-    @Patch(className = "zombie.characters.IsoPlayer", methodName = "setAngleFromAim", warmUp = true)
-    public static class ViewpointAimPitch {
-        @Patch.OnExit
-        public static void exit(@Patch.This(readOnly = true) Object player) {
-            Bridge.syncViewpointAimPitch(player);
+        public static void exit(@Patch.Return(readOnly = false) boolean result) {
+            result = Bridge.shouldSkipSetupBlock(result);
         }
     }
 

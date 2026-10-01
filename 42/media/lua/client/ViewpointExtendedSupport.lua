@@ -1,3 +1,5 @@
+require "PZAPI/ModOptions"
+
 local Support = ViewpointExtendedSupport
 
 local function keyOrFallback(name, fallback)
@@ -15,6 +17,8 @@ if PZAPI and PZAPI.ModOptions then
     options.ergonomicUi = modOptions:addTickBox("ErgonomicUIIntegration", "Integrate with Ergonomic UI", true)
     options.vehicleCamera = modOptions:addTickBox("ThirdPersonInVehicles", "Use third person in vehicles", true)
     options.thirdPersonScrollZoom = modOptions:addTickBox("ThirdPersonScrollZoom", "Zoom third-person camera with mouse wheel", true)
+    options.skipSetup = modOptions:addTickBox("SkipSetupWizard", "Skip Viewpoint startup setup screen", true)
+    options.startViewpoint = modOptions:addTickBox("StartViewpointOnGameStart", "Start Viewpoint automatically when entering a game", true)
     options.cursorDiagnostics = modOptions:addTickBox("CursorDiagnostics", "Log cursor and reticle diagnostics", true)
 end
 
@@ -36,7 +40,8 @@ local function syncConfiguration()
         optionValue(options.autoUi, true),
         optionValue(options.viewModeKey, 0),
         optionValue(options.cursorDiagnostics, true),
-        optionValue(options.thirdPersonScrollZoom, true)
+        optionValue(options.thirdPersonScrollZoom, true),
+        optionValue(options.skipSetup, true)
     )
 end
 
@@ -80,7 +85,17 @@ local UI_CLASSES = {
     "ISTradingUI",
 }
 
+local function visibleInventory(getter)
+    if type(getter) ~= "function" then return false end
+    local ok, ui = pcall(getter, 0)
+    return ok and isVisible(ui)
+end
+
 local function visibleGameWindow()
+    if visibleInventory(getPlayerInventory) or visibleInventory(getPlayerLoot) then
+        return true
+    end
+
     if not UIManager or not UIManager.getUI then return false end
     local ok, uiList = pcall(function() return UIManager.getUI() end)
     if not ok or not uiList or not uiList.size then return false end
@@ -192,6 +207,9 @@ end)
 Events.OnGameStart.Add(function()
     syncConfiguration()
     installErgonomicUIIntegration()
+    if optionValue(options.startViewpoint, true) and Support and Support.enableViewpoint then
+        Support.enableViewpoint()
+    end
 end)
 
 syncConfiguration()

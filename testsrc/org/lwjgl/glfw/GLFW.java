@@ -9,4 +9,8 @@ public final class GLFW {
     public static void glfwSetInputMode(long window, int modeKey, int value) {
         mode = value;
     }
+
+    public static int glfwGetInputMode(long window, int modeKey) {
+        return mode;
+    }
 }

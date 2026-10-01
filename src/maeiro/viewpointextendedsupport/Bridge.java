@@ -4,9 +4,6 @@ import java.lang.reflect.Field;
 import java.lang.reflect.Method;
 
 import me.zed_0xff.zombie_buddy.Exposer;
-import zombie.core.physics.BallisticsController;
-import zombie.iso.Vector2;
-import zombie.iso.Vector3;
 
 @Exposer.LuaClass(name = "ViewpointExtendedSupport")
 public final class Bridge {
@@ -17,13 +14,10 @@ public final class Bridge {
     private static final int GLFW_CURSOR = 208897;
     private static final int GLFW_CURSOR_NORMAL = 212993;
     private static final int GLFW_CURSOR_HIDDEN = 212994;
-    private static final int HIDDEN_RETICLE_COORDINATE = -10000;
     private static final float THIRD_PERSON_ZOOM_STEP = 0.5f;
     private static final float THIRD_PERSON_ZOOM_MIN = -2.0f;
     private static final float THIRD_PERSON_ZOOM_MAX = 8.0f;
     private static final float THIRD_PERSON_BOOM_MIN = 0.5f;
-    private static final float VIEWPOINT_VERTICAL_SCALE = 2.4494896f;
-    private static final float DEFAULT_FIREARM_RANGE = 8.0f;
 
     private static volatile int firstPersonKey = VIEWPOINT_TOGGLE_KEY;
     private static volatile int thirdPersonKey = VIEWPOINT_TOGGLE_KEY;
@@ -34,6 +28,7 @@ public final class Bridge {
     private static volatile boolean autoCursorInUi = true;
     private static volatile boolean debugLogging = true;
     private static volatile boolean thirdPersonScrollZoom = true;
+    private static volatile boolean skipSetupWizard = true;
     private static volatile float thirdPersonZoomOffset;
     private static volatile int pendingMouseWheel;
     private static volatile boolean autoCursorRequested;
@@ -54,65 +49,11 @@ public final class Bridge {
     private static volatile Method getCameraCharacter;
     private static volatile Method getPlayerVehicle;
     private static volatile Method getMouseWheelState;
-    private static volatile Method isAimingMethod;
-    private static volatile Method setTargetAimPitchMethod;
-    private static volatile Method getMuzzlePosition;
-    private static volatile Class<?> ballisticsMethodClass;
-    private static volatile Field controllerCharacter;
-    private static volatile Class<?> controllerClass;
-    private static volatile Method getControllerId;
-    private static volatile Method getIsoAimingPosition;
-    private static volatile Method getCameraTargets;
-    private static volatile Method getNumberOfCameraTargets;
-    private static volatile Method getCameraTargetsArray;
-    private static volatile Field viewpointFrames;
-    private static volatile Field frameCamX;
-    private static volatile Field frameCamY;
-    private static volatile Field frameCamZ;
-    private static volatile Field frameEyeX;
-    private static volatile Field frameEyeY;
-    private static volatile Field frameEyeZ;
-    private static volatile Method thirdPersonView;
-    private static volatile Field spriteRendererInstance;
-    private static volatile Method getMainStateIndex;
-    private static volatile Method getAttackingWeapon;
-    private static volatile Method getPrimaryHandItem;
-    private static volatile Method getMaxRangeWithCharacter;
-    private static volatile Method getMaxRangeWithoutCharacter;
-    private static volatile Class<?> weaponClass;
-    private static volatile Method bulletReticlePosition;
-    private static volatile Method bulletReticleQuaternion;
-    private static volatile Class<?> bulletClass;
-    private static volatile Class<?> jomlVectorClass;
-    private static volatile Class<?> jomlQuaternionClass;
-    private static volatile Method jomlLookAlong;
-    private static volatile Method jomlConjugate;
-    private static volatile java.lang.reflect.Constructor<?> jomlVectorConstructor;
-    private static volatile java.lang.reflect.Constructor<?> jomlQuaternionConstructor;
-    private static volatile Field jomlQuaternionX;
-    private static volatile Field jomlQuaternionY;
-    private static volatile Field jomlQuaternionZ;
-    private static volatile Field jomlQuaternionW;
-    private static volatile Object lastBallisticsController;
-    private static final Vector3 cameraOrigin = new Vector3();
-    private static final Vector3 cameraDirection = new Vector3();
-    private static final Vector3 cameraPhysicalDirection = new Vector3();
-    private static final Vector3 cameraEndpoint = new Vector3();
-    private static final Vector3 cameraTarget = new Vector3();
-    private static final Vector3 cameraCandidate = new Vector3();
-    private static final Vector3 centeredMuzzle = new Vector3();
-    private static final float[] thirdPersonEye = new float[3];
-    private static volatile boolean crosshairTarget;
-    private static volatile boolean firearmAiming;
-    private static volatile int cameraTargetId = -1;
-    private static volatile Class<?> firearmCharacterClass;
-    private static volatile Method primaryHandItemMethod;
-    private static volatile Method firearmAimingMethod;
     private static volatile Class<?> vehicleMethodClass;
-    private static volatile Class<?> aimMethodClass;
     private static volatile Method getDisplayWindow;
     private static volatile Method glfwSetInputMode;
     private static volatile Method glfwGetInputMode;
+
     private static volatile long vanillaCursorHookCalls;
     private static volatile long viewpointCursorHookCalls;
     private static volatile long directCursorRenderCalls;
@@ -122,11 +63,9 @@ public final class Bridge {
     private static volatile long lookMouseCursorHookCalls;
     private static volatile long mouseCursorTextureHookCalls;
     private static volatile long mouseCursorVisibilityHookCalls;
+    private static volatile long mouseCursorVisibleCalls;
+    private static volatile long mouseCursorHiddenCalls;
     private static volatile long directCursorRenderSkippedCalls;
-    private static volatile long ballisticsMuzzleHookCalls;
-    private static volatile long ballisticsCameraHookCalls;
-    private static volatile long ballisticsCameraTargetCount;
-    private static volatile boolean ballisticsFailureLogged;
     private static volatile long diagnosticTicks;
     private static volatile boolean diagnosticStateInitialized;
     private static volatile boolean diagnosticViewEnabled;
@@ -142,12 +81,20 @@ public final class Bridge {
                                  boolean holdCursor, int cursorKey, boolean autoUi,
                                  int modeToggleKey, boolean debug) {
         configure(firstKey, thirdKey, requireShift, holdCursor, cursorKey, autoUi,
-                modeToggleKey, debug, true);
+                modeToggleKey, debug, true, true);
     }
 
     public static void configure(int firstKey, int thirdKey, boolean requireShift,
                                  boolean holdCursor, int cursorKey, boolean autoUi,
                                  int modeToggleKey, boolean debug, boolean scrollZoom) {
+        configure(firstKey, thirdKey, requireShift, holdCursor, cursorKey, autoUi,
+                modeToggleKey, debug, scrollZoom, true);
+    }
+
+    public static void configure(int firstKey, int thirdKey, boolean requireShift,
+                                 boolean holdCursor, int cursorKey, boolean autoUi,
+                                 int modeToggleKey, boolean debug, boolean scrollZoom,
+                                 boolean skipWizard) {
         firstPersonKey = Math.max(0, firstKey);
         thirdPersonKey = Math.max(0, thirdKey);
         viewModeToggleKey = Math.max(0, modeToggleKey);
@@ -157,6 +104,15 @@ public final class Bridge {
         autoCursorInUi = autoUi;
         debugLogging = debug;
         thirdPersonScrollZoom = scrollZoom;
+        skipSetupWizard = skipWizard;
+    }
+
+    public static boolean shouldSkipSetupWizard() {
+        return skipSetupWizard;
+    }
+
+    public static boolean shouldSkipSetupBlock(boolean original) {
+        return skipSetupWizard ? false : original;
     }
 
     public static void setAutoCursorRequested(boolean requested) {
@@ -164,11 +120,11 @@ public final class Bridge {
         autoCursorRequested = requested;
         if (changed) {
             logDiagnosticState();
+            applyCursorOverride();
         }
     }
 
     public static void diagnosticTick() {
-        refreshFirearmAiming();
         if (!debugLogging) {
             return;
         }
@@ -187,10 +143,9 @@ public final class Bridge {
                 + ", lookMouseCursor=" + lookMouseCursorHookCalls
                 + ", cursorTexture=" + mouseCursorTextureHookCalls
                 + ", cursorVisibility=" + mouseCursorVisibilityHookCalls
+                + ", cursorVisible=" + mouseCursorVisibleCalls
+                + ", cursorHidden=" + mouseCursorHiddenCalls
                 + ", directCursorSkipped=" + directCursorRenderSkippedCalls
-                + ", ballisticsMuzzle=" + ballisticsMuzzleHookCalls
-                + ", ballisticsCamera=" + ballisticsCameraHookCalls
-                + ", ballisticsTargets=" + ballisticsCameraTargetCount
                 + ", view=" + isViewEnabled()
                 + ", free=" + isFreeCursor()
                 + ", auto=" + autoCursorRequested
@@ -251,12 +206,10 @@ public final class Bridge {
 
     public static void setViewEnabled(boolean enabled) {
         setBoolean(viewEnabled, "viewpoint.core.View", "enabled", enabled);
-        if (!enabled) {
-            crosshairTarget = false;
-            firearmAiming = false;
-            lastBallisticsController = null;
-            FirearmTargetOutline.clear();
-        }
+    }
+
+    public static boolean enableViewpoint() {
+        return isViewEnabled() || toggleView();
     }
 
     public static boolean isFreeCursor() {
@@ -293,667 +246,22 @@ public final class Bridge {
 
     public static boolean shouldSkipVanillaReticle(boolean original) {
         recordHook(4, "Hooks.skipIsoReticle", original);
-        return shouldSkipReticle(original);
+        if (!isViewEnabled()) {
+            return original;
+        }
+        return isFreeCursor() || isThirdPersonVehicle();
     }
 
     public static boolean shouldSkipViewpointReticle(boolean original) {
         recordHook(5, "Patch_IsoReticle.enter", original);
-        return shouldSkipReticle(original);
+        if (!isViewEnabled()) {
+            return original;
+        }
+        return isFreeCursor() || isThirdPersonVehicle();
     }
 
     public static boolean shouldSkipViewpointCrosshair() {
-        if (!isViewEnabled()) {
-            return false;
-        }
-        if (isFreeCursor() || isThirdPersonVehicle()) {
-            return true;
-        }
-        return firearmAiming && Crosshair.draw(crosshairTarget);
-    }
-
-    public static int overrideAimingReticleX(int playerIndex, int original) {
-        if (!isViewEnabled() || isFreeCursor() || isThirdPersonVehicle()) {
-            return original;
-        }
-        try {
-            return HIDDEN_RETICLE_COORDINATE;
-        } catch (Throwable ignored) {
-            return original;
-        }
-    }
-
-    public static int overrideAimingReticleY(int playerIndex, int original) {
-        if (!isViewEnabled() || isFreeCursor() || isThirdPersonVehicle()) {
-            return original;
-        }
-        try {
-            return HIDDEN_RETICLE_COORDINATE;
-        } catch (Throwable ignored) {
-            return original;
-        }
-    }
-
-    public static void adjustViewpointMuzzleDirection(Vector3 direction) {
-        if (direction == null || !isViewEnabled() || isFreeCursor() || isThirdPersonVehicle()) {
-            return;
-        }
-
-        setViewpointAimDirection(direction, direction);
-    }
-
-    public static void adjustViewpointMuzzle(Object controller,
-                                              Vector3 muzzlePosition,
-                                              Vector3 direction) {
-        if (controller == null || muzzlePosition == null || direction == null
-                || !isViewEnabled() || isFreeCursor() || isThirdPersonVehicle()
-                || !isViewpointFirearmController(controller)) {
-            return;
-        }
-
-        try {
-            ballisticsMuzzleHookCalls++;
-            if (debugLogging && ballisticsMuzzleHookCalls == 1L) {
-                System.out.println("[Viewpoint Extended Support] PZ3D-style ballistics hook active");
-            }
-            readViewpointCamera(muzzlePosition, cameraOrigin, cameraDirection,
-                    cameraPhysicalDirection);
-
-            float range = getFirearmRange(controller);
-            float cameraDistance = range + physicalDistance(cameraOrigin, muzzlePosition);
-            setEndpoint(cameraOrigin, cameraPhysicalDirection, cameraDistance, cameraEndpoint);
-            updateBulletAim(controller, cameraOrigin, cameraPhysicalDirection);
-            cameraTarget.set(cameraEndpoint.x, cameraEndpoint.y, cameraEndpoint.z);
-            boolean targetFound = selectCameraTarget(controller, cameraDistance, cameraTarget);
-            Object character = getControllerCharacter(controller);
-            firearmAiming = isCapturedFirearmAim(character);
-            crosshairTarget = firearmAiming && targetFound;
-            applyPz3dMuzzleCorrection(cameraOrigin, cameraDirection, cameraTarget,
-                    muzzlePosition, direction, isThirdPerson());
-            setIsoAimingPosition(controller, cameraEndpoint);
-            lastBallisticsController = controller;
-            if (crosshairTarget) {
-                FirearmTargetOutline.update(character, cameraTargetId);
-            } else {
-                FirearmTargetOutline.clear();
-            }
-        } catch (Throwable error) {
-            reportBallisticsFailure("muzzle", error);
-        }
-    }
-
-    public static void syncViewpointBallisticsCamera(Object controller) {
-        if (controller == null || !isViewEnabled() || isFreeCursor()
-                || isThirdPersonVehicle() || !isViewpointFirearmController(controller)) {
-            return;
-        }
-
-        try {
-            ballisticsCameraHookCalls++;
-            if (getMuzzlePosition == null || ballisticsMethodClass != controller.getClass()) {
-                getMuzzlePosition = publicMethod(controller.getClass(), "getMuzzlePosition");
-                ballisticsMethodClass = controller.getClass();
-            }
-            if (getMuzzlePosition == null) {
-                return;
-            }
-
-            Vector3 muzzlePosition = (Vector3) getMuzzlePosition.invoke(controller);
-            if (muzzlePosition == null) {
-                return;
-            }
-
-            readViewpointCamera(muzzlePosition, cameraOrigin, cameraDirection,
-                    cameraPhysicalDirection);
-            updateBulletAim(controller, cameraOrigin, cameraPhysicalDirection);
-
-            if (lastBallisticsController == controller) {
-                setIsoAimingPosition(controller, cameraEndpoint);
-            }
-        } catch (Throwable error) {
-            reportBallisticsFailure("camera", error);
-        }
-    }
-
-    static void applyPz3dMuzzleCorrection(Vector3 cameraOrigin,
-                                           Vector3 cameraDirection,
-                                           Vector3 endpoint,
-                                           Vector3 muzzlePosition,
-                                           Vector3 muzzleDirection,
-                                           boolean thirdPerson) {
-        if (thirdPerson) {
-            setDirectionFromTo(muzzlePosition, endpoint, muzzleDirection);
-            return;
-        }
-
-        centeredOrigin(cameraOrigin, cameraDirection, endpoint, muzzlePosition, centeredMuzzle);
-        muzzlePosition.set(centeredMuzzle.x, centeredMuzzle.y, centeredMuzzle.z);
-        muzzleDirection.set(cameraDirection.x, cameraDirection.y, cameraDirection.z);
-        normalize(muzzleDirection);
-    }
-
-    static void centeredOrigin(Vector3 cameraOrigin,
-                               Vector3 cameraDirection,
-                               Vector3 endpoint,
-                               Vector3 muzzlePosition,
-                               Vector3 result) {
-        float physicalLength = (float) Math.sqrt(cameraDirection.x * cameraDirection.x
-                + cameraDirection.y * cameraDirection.y
-                + cameraDirection.z * cameraDirection.z
-                * VIEWPOINT_VERTICAL_SCALE * VIEWPOINT_VERTICAL_SCALE);
-        if (physicalLength <= 0.0001f) {
-            result.set(muzzlePosition.x, muzzlePosition.y, muzzlePosition.z);
-            return;
-        }
-        float dx = cameraDirection.x / physicalLength;
-        float dy = cameraDirection.y / physicalLength;
-        float dz = cameraDirection.z * VIEWPOINT_VERTICAL_SCALE / physicalLength;
-        float muzzleAlong = physicalDot(muzzlePosition.x - cameraOrigin.x,
-                muzzlePosition.y - cameraOrigin.y,
-                (muzzlePosition.z - cameraOrigin.z) * VIEWPOINT_VERTICAL_SCALE,
-                dx, dy, dz);
-        float endpointAlong = physicalDot(endpoint.x - cameraOrigin.x,
-                endpoint.y - cameraOrigin.y,
-                (endpoint.z - cameraOrigin.z) * VIEWPOINT_VERTICAL_SCALE,
-                dx, dy, dz);
-        float along = clamp(muzzleAlong, 0.0f, endpointAlong - 0.01f);
-        result.set(cameraOrigin.x + dx * along,
-                cameraOrigin.y + dy * along,
-                cameraOrigin.z + dz * along / VIEWPOINT_VERTICAL_SCALE);
-    }
-
-    private static void setViewpointAimDirection(Vector3 source, Vector3 result) {
-        float horizontalLength = (float) Math.sqrt(source.x * source.x + source.y * source.y);
-        if (horizontalLength <= 0.0001f) {
-            float yaw = getViewpointYaw();
-            result.x = (float) Math.cos(yaw);
-            result.y = (float) Math.sin(yaw);
-            horizontalLength = 1.0f;
-        } else if (source != result) {
-            result.x = source.x / horizontalLength;
-            result.y = source.y / horizontalLength;
-        } else {
-            result.x /= horizontalLength;
-            result.y /= horizontalLength;
-        }
-
-        float pitch = getViewpointPitch();
-        float horizontalScale = (float) Math.cos(pitch);
-        result.x *= horizontalScale;
-        result.y *= horizontalScale;
-        result.z = (float) Math.sin(pitch);
-        normalize(result);
-    }
-
-    static void readViewpointCamera(Vector3 fallbackOrigin,
-                                    Vector3 originResult,
-                                    Vector3 directionResult,
-                                    Vector3 physicalDirectionResult) {
-        try {
-            if (viewpointFrames == null) {
-                viewpointFrames = field("viewpoint.FP", "frames");
-            }
-            if (viewpointFrames == null) {
-                setFallbackCamera(fallbackOrigin, originResult, directionResult,
-                        physicalDirectionResult);
-                return;
-            }
-
-            Object frames = viewpointFrames.get(null);
-            if (frames == null || !frames.getClass().isArray()
-                    || java.lang.reflect.Array.getLength(frames) == 0) {
-                setFallbackCamera(fallbackOrigin, originResult, directionResult,
-                        physicalDirectionResult);
-                return;
-            }
-
-            int index = 0;
-            Object renderer = getSpriteRendererInstance();
-            if (renderer != null) {
-                if (getMainStateIndex == null) {
-                    getMainStateIndex = publicMethod(renderer.getClass(), "getMainStateIndex");
-                }
-                if (getMainStateIndex != null) {
-                    index = ((Number) getMainStateIndex.invoke(renderer)).intValue();
-                }
-            }
-            index = Math.max(0, Math.min(index, java.lang.reflect.Array.getLength(frames) - 1));
-            Object frame = java.lang.reflect.Array.get(frames, index);
-            if (frame == null) {
-                setFallbackCamera(fallbackOrigin, originResult, directionResult,
-                        physicalDirectionResult);
-                return;
-            }
-
-            if (frameCamX == null) {
-                frameCamX = field(frame.getClass().getName(), "camX");
-                frameCamY = field(frame.getClass().getName(), "camY");
-                frameCamZ = field(frame.getClass().getName(), "camZ");
-                frameEyeX = field(frame.getClass().getName(), "eyeX");
-                frameEyeY = field(frame.getClass().getName(), "eyeY");
-                frameEyeZ = field(frame.getClass().getName(), "eyeZ");
-            }
-            if (frameCamX == null || frameCamY == null || frameCamZ == null
-                    || frameEyeX == null || frameEyeY == null || frameEyeZ == null) {
-                setFallbackCamera(fallbackOrigin, originResult, directionResult,
-                        physicalDirectionResult);
-                return;
-            }
-
-            float yaw = getViewpointYaw();
-            float pitch = getViewpointPitch();
-            originResult.set(frameCamX.getFloat(frame) - frameEyeX.getFloat(frame)
-                            + (float) Math.cos(yaw) * 0.12f,
-                    frameCamY.getFloat(frame) - frameEyeZ.getFloat(frame)
-                            + (float) Math.sin(yaw) * 0.12f,
-                    frameCamZ.getFloat(frame) + frameEyeY.getFloat(frame)
-                            / VIEWPOINT_VERTICAL_SCALE);
-            if (isThirdPerson()) {
-                if (thirdPersonView == null) {
-                    thirdPersonView = publicMethod(Class.forName("viewpoint.input.ThirdPerson"),
-                            "view", frame.getClass(), float.class, float.class, float[].class);
-                }
-                if (thirdPersonView != null
-                        && Boolean.TRUE.equals(thirdPersonView.invoke(null, frame, yaw, pitch,
-                                thirdPersonEye))) {
-                    originResult.set(frameCamX.getFloat(frame) - thirdPersonEye[0],
-                            frameCamY.getFloat(frame) - thirdPersonEye[2],
-                            frameCamZ.getFloat(frame)
-                                    + thirdPersonEye[1] / VIEWPOINT_VERTICAL_SCALE);
-                }
-            }
-            setViewpointDirection(yaw, pitch,
-                    directionResult, physicalDirectionResult);
-        } catch (Throwable ignored) {
-            setFallbackCamera(fallbackOrigin, originResult, directionResult,
-                    physicalDirectionResult);
-        }
-    }
-
-    private static void setFallbackCamera(Vector3 fallbackOrigin,
-                                          Vector3 originResult,
-                                          Vector3 directionResult,
-                                          Vector3 physicalDirectionResult) {
-        originResult.set(fallbackOrigin.x, fallbackOrigin.y, fallbackOrigin.z);
-        setViewpointDirection(getViewpointYaw(), getViewpointPitch(),
-                directionResult, physicalDirectionResult);
-    }
-
-    private static void setViewpointDirection(float yaw, float pitch,
-                                              Vector3 directionResult,
-                                              Vector3 physicalDirectionResult) {
-        float horizontal = (float) Math.cos(pitch);
-        physicalDirectionResult.set((float) Math.cos(yaw) * horizontal,
-                (float) Math.sin(yaw) * horizontal,
-                (float) Math.sin(pitch));
-        normalize(physicalDirectionResult);
-        directionResult.set(physicalDirectionResult.x,
-                physicalDirectionResult.y,
-                physicalDirectionResult.z / VIEWPOINT_VERTICAL_SCALE);
-        normalize(directionResult);
-    }
-
-    private static boolean isViewpointFirearmController(Object controller) {
-        try {
-            Object character = getControllerCharacter(controller);
-            if (character == null) {
-                return false;
-            }
-
-            Object cameraCharacter = callObject("zombie.iso.IsoCamera", "getCameraCharacter");
-            if (cameraCharacter != null && cameraCharacter != character) {
-                return false;
-            }
-
-            Object weapon = getCharacterWeapon(character);
-            if (weapon == null) {
-                return false;
-            }
-            Method ranged = publicMethod(weapon.getClass(), "isRanged");
-            return ranged == null || Boolean.TRUE.equals(ranged.invoke(weapon));
-        } catch (Throwable ignored) {
-            return false;
-        }
-    }
-
-    private static Object getControllerCharacter(Object controller) {
-        try {
-            if (controllerClass != controller.getClass()) {
-                controllerClass = controller.getClass();
-                controllerCharacter = field(controller.getClass().getName(), "isoGameCharacter");
-                getControllerId = publicMethod(controller.getClass(), "getID");
-                getIsoAimingPosition = publicMethod(controller.getClass(), "getIsoAimingPosition");
-                getCameraTargets = publicMethod(controller.getClass(), "getCameraTargets",
-                        float.class, boolean.class);
-                getNumberOfCameraTargets = publicMethod(controller.getClass(),
-                        "getNumberOfCameraTargets");
-                getCameraTargetsArray = publicMethod(controller.getClass(), "getCameraTargets");
-            }
-            return controllerCharacter == null ? null : controllerCharacter.get(controller);
-        } catch (Throwable ignored) {
-            return null;
-        }
-    }
-
-    private static Object getCharacterWeapon(Object character) {
-        try {
-            if (getAttackingWeapon == null) {
-                getAttackingWeapon = publicMethod(character.getClass(), "getAttackingWeapon");
-            }
-            Object weapon = getAttackingWeapon == null ? null : getAttackingWeapon.invoke(character);
-            if (weapon == null) {
-                if (getPrimaryHandItem == null) {
-                    getPrimaryHandItem = publicMethod(character.getClass(), "getPrimaryHandItem");
-                }
-                weapon = getPrimaryHandItem == null ? null : getPrimaryHandItem.invoke(character);
-            }
-            return weapon;
-        } catch (Throwable ignored) {
-            return null;
-        }
-    }
-
-    private static float getFirearmRange(Object controller) {
-        try {
-            Object character = getControllerCharacter(controller);
-            Object weapon = character == null ? null : getCharacterWeapon(character);
-            if (weapon == null) {
-                return DEFAULT_FIREARM_RANGE;
-            }
-
-            if (weaponClass != weapon.getClass()) {
-                weaponClass = weapon.getClass();
-                getMaxRangeWithCharacter = null;
-                getMaxRangeWithoutCharacter = null;
-                for (Method candidate : weapon.getClass().getMethods()) {
-                    if (!candidate.getName().equals("getMaxRange")) {
-                        continue;
-                    }
-                    candidate.setAccessible(true);
-                    if (candidate.getParameterCount() == 1) {
-                        getMaxRangeWithCharacter = candidate;
-                    } else if (candidate.getParameterCount() == 0) {
-                        getMaxRangeWithoutCharacter = candidate;
-                    }
-                }
-            }
-
-            Number value = null;
-            if (getMaxRangeWithCharacter != null) {
-                value = (Number) getMaxRangeWithCharacter.invoke(weapon, character);
-            } else if (getMaxRangeWithoutCharacter != null) {
-                value = (Number) getMaxRangeWithoutCharacter.invoke(weapon);
-            }
-            float range = value == null ? DEFAULT_FIREARM_RANGE : value.floatValue();
-            return range > 0.0f ? range : DEFAULT_FIREARM_RANGE;
-        } catch (Throwable ignored) {
-            return DEFAULT_FIREARM_RANGE;
-        }
-    }
-
-    private static boolean selectCameraTarget(Object controller, float maxDistance, Vector3 endpoint) {
-        cameraTargetId = -1;
-        try {
-            if (getCameraTargets == null || getNumberOfCameraTargets == null
-                    || getCameraTargetsArray == null) {
-                return false;
-            }
-
-            getCameraTargets.invoke(controller, maxDistance, true);
-            int count = ((Number) getNumberOfCameraTargets.invoke(controller)).intValue();
-            if (count <= 0) {
-                return false;
-            }
-
-            float[] targets = (float[]) getCameraTargetsArray.invoke(controller);
-            if (targets == null || targets.length < 4) {
-                return false;
-            }
-
-            Vector3 candidate = cameraCandidate;
-            candidate.set(targets[1], targets[3], targets[2] / VIEWPOINT_VERTICAL_SCALE);
-            float dx = targets[1] - cameraOrigin.x;
-            float dy = targets[3] - cameraOrigin.y;
-            float dz = targets[2] - cameraOrigin.z * VIEWPOINT_VERTICAL_SCALE;
-            float along = physicalDot(dx, dy, dz, cameraPhysicalDirection.x,
-                    cameraPhysicalDirection.y, cameraPhysicalDirection.z);
-            float offAxisSquared = dx * dx + dy * dy + dz * dz - along * along;
-            if (along > 0.0f && along <= maxDistance && offAxisSquared <= 0.1225f) {
-                endpoint.set(candidate.x, candidate.y, candidate.z);
-                cameraTargetId = (int) targets[0];
-                ballisticsCameraTargetCount++;
-                return true;
-            }
-        } catch (Throwable ignored) {
-        }
-        return false;
-    }
-
-    private static void setIsoAimingPosition(Object controller, Vector3 endpoint) {
-        try {
-            if (getIsoAimingPosition == null) {
-                return;
-            }
-            Object aimingPosition = getIsoAimingPosition.invoke(controller);
-            if (aimingPosition instanceof Vector3) {
-                ((Vector3) aimingPosition).set(endpoint.x, endpoint.y, endpoint.z);
-            }
-        } catch (Throwable ignored) {
-        }
-    }
-
-    private static void updateBulletAim(Object controller, Vector3 origin, Vector3 physicalDirection) {
-        try {
-            if (getControllerId == null) {
-                throw new IllegalStateException("BallisticsController.getID unavailable");
-            }
-            int id = ((Number) getControllerId.invoke(controller)).intValue();
-            if (bulletClass == null) {
-                bulletClass = Class.forName("zombie.core.physics.Bullet");
-                bulletReticlePosition = publicMethod(bulletClass,
-                        "updateBallisticsAimReticlePosition", int.class,
-                        float.class, float.class, float.class);
-                bulletReticleQuaternion = publicMethod(bulletClass,
-                        "updateBallisticsAimReticleQuaternion", int.class,
-                        float.class, float.class, float.class, float.class);
-            }
-            if (bulletReticlePosition == null) {
-                throw new IllegalStateException("Bullet reticle position unavailable");
-            }
-            bulletReticlePosition.invoke(null, id, origin.x,
-                    origin.z * VIEWPOINT_VERTICAL_SCALE, origin.y);
-            updateBulletQuaternion(id, physicalDirection);
-        } catch (Throwable error) {
-            reportBallisticsFailure("Bullet reticle", error);
-        }
-    }
-
-    private static void updateBulletQuaternion(int id, Vector3 direction) {
-        try {
-            if (bulletReticleQuaternion == null) {
-                throw new IllegalStateException("Bullet reticle quaternion unavailable");
-            }
-            if (jomlVectorClass == null) {
-                jomlVectorClass = Class.forName("org.joml.Vector3f");
-                jomlQuaternionClass = Class.forName("org.joml.Quaternionf");
-                jomlVectorConstructor = jomlVectorClass.getConstructor(
-                        float.class, float.class, float.class);
-                jomlQuaternionConstructor = jomlQuaternionClass.getConstructor();
-                for (Method candidate : jomlQuaternionClass.getMethods()) {
-                    if (candidate.getName().equals("lookAlong")
-                            && candidate.getParameterCount() == 2) {
-                        jomlLookAlong = candidate;
-                    } else if (candidate.getName().equals("conjugate")
-                            && candidate.getParameterCount() == 0) {
-                        jomlConjugate = candidate;
-                    }
-                }
-                jomlQuaternionX = jomlQuaternionClass.getField("x");
-                jomlQuaternionY = jomlQuaternionClass.getField("y");
-                jomlQuaternionZ = jomlQuaternionClass.getField("z");
-                jomlQuaternionW = jomlQuaternionClass.getField("w");
-            }
-            if (jomlLookAlong == null || jomlConjugate == null) {
-                throw new IllegalStateException("JOML camera rotation unavailable");
-            }
-
-            Object physicalDirection = jomlVectorConstructor.newInstance(
-                    direction.x, direction.z, direction.y);
-            float upX = 0.0f;
-            float upY = Math.abs(direction.z) < 0.999f ? 1.0f : 0.0f;
-            float upZ = Math.abs(direction.z) < 0.999f ? 0.0f : 1.0f;
-            Object up = jomlVectorConstructor.newInstance(upX, upY, upZ);
-            Object quaternion = jomlQuaternionConstructor.newInstance();
-            jomlLookAlong.invoke(quaternion, physicalDirection, up);
-            jomlConjugate.invoke(quaternion);
-            bulletReticleQuaternion.invoke(null, id,
-                    jomlQuaternionX.getFloat(quaternion),
-                    jomlQuaternionY.getFloat(quaternion),
-                    jomlQuaternionZ.getFloat(quaternion),
-                    jomlQuaternionW.getFloat(quaternion));
-        } catch (Throwable error) {
-            reportBallisticsFailure("Bullet rotation", error);
-        }
-    }
-
-    private static void reportBallisticsFailure(String stage, Throwable error) {
-        if (!debugLogging || ballisticsFailureLogged) {
-            return;
-        }
-        ballisticsFailureLogged = true;
-        System.out.println("[Viewpoint Extended Support] ballistics failure at " + stage);
-        error.printStackTrace(System.out);
-    }
-
-    private static Object getSpriteRendererInstance() {
-        try {
-            if (spriteRendererInstance == null) {
-                spriteRendererInstance = field("zombie.core.SpriteRenderer", "instance");
-            }
-            return spriteRendererInstance == null ? null : spriteRendererInstance.get(null);
-        } catch (Throwable ignored) {
-            return null;
-        }
-    }
-
-    private static void setEndpoint(Vector3 origin, Vector3 physicalDirection,
-                                    float distance, Vector3 endpoint) {
-        endpoint.set(origin.x + physicalDirection.x * distance,
-                origin.y + physicalDirection.y * distance,
-                origin.z + physicalDirection.z * distance / VIEWPOINT_VERTICAL_SCALE);
-    }
-
-    private static void setDirectionFromTo(Vector3 origin, Vector3 endpoint, Vector3 result) {
-        result.set(endpoint.x - origin.x, endpoint.y - origin.y, endpoint.z - origin.z);
-        normalize(result);
-    }
-
-    private static float physicalDistance(Vector3 firstIso, Vector3 secondIso) {
-        float x = firstIso.x - secondIso.x;
-        float y = firstIso.y - secondIso.y;
-        float z = (firstIso.z - secondIso.z) * VIEWPOINT_VERTICAL_SCALE;
-        return (float) Math.sqrt(x * x + y * y + z * z);
-    }
-
-    private static float physicalDot(float x, float y, float z,
-                                     float directionX, float directionY, float directionZ) {
-        return x * directionX + y * directionY + z * directionZ;
-    }
-
-    private static void normalize(Vector3 vector) {
-        float length = (float) Math.sqrt(vector.x * vector.x
-                + vector.y * vector.y + vector.z * vector.z);
-        if (length > 0.0001f) {
-            vector.x /= length;
-            vector.y /= length;
-            vector.z /= length;
-        }
-    }
-
-    public static void syncViewpointAimPitch(Object player) {
-        if (player == null || !isViewEnabled() || isFreeCursor() || isThirdPersonVehicle()) {
-            return;
-        }
-
-        try {
-            if (aimMethodClass != player.getClass()
-                    || isAimingMethod == null || setTargetAimPitchMethod == null) {
-                isAimingMethod = player.getClass().getMethod("isAiming");
-                setTargetAimPitchMethod = player.getClass().getMethod(
-                        "setTargetVerticalAimAngle", float.class);
-                isAimingMethod.setAccessible(true);
-                setTargetAimPitchMethod.setAccessible(true);
-                aimMethodClass = player.getClass();
-            }
-            if (!Boolean.TRUE.equals(isAimingMethod.invoke(player))) {
-                return;
-            }
-            setTargetAimPitchMethod.invoke(player,
-                    (float) Math.toDegrees(getViewpointPitch()));
-        } catch (Throwable ignored) {
-        }
-    }
-
-    public static void overrideCalculatedAimVector(Object player, Vector2 result) {
-        if (result == null || !isCapturedFirearmAim(player)) {
-            return;
-        }
-        float yaw = getViewpointYaw();
-        result.set((float) Math.cos(yaw), (float) Math.sin(yaw));
-    }
-
-    public static void stabilizeAimVector(Object controller,
-                                          BallisticsController.AimingVectorParameters parameters,
-                                          boolean valid) {
-        if (!valid || parameters == null
-                || !isCapturedFirearmAim(getControllerCharacter(controller))) {
-            return;
-        }
-
-        float yaw = getViewpointYaw();
-        float pitch = getViewpointPitch();
-        float horizontal = (float) Math.cos(pitch);
-        float x = (float) Math.cos(yaw);
-        float y = (float) Math.sin(yaw);
-        parameters.desiredForward.set(x * horizontal, y * horizontal,
-                (float) Math.sin(pitch) / VIEWPOINT_VERTICAL_SCALE);
-        parameters.desiredForward.normalize();
-        parameters.desiredForward2f.set(x, y);
-        parameters.desiredForwardPitchRads = pitch;
-    }
-
-    private static void refreshFirearmAiming() {
-        firearmAiming = isCapturedFirearmAim(
-                callObject("zombie.iso.IsoCamera", "getCameraCharacter"));
-        if (!firearmAiming) {
-            crosshairTarget = false;
-            FirearmTargetOutline.clear();
-        }
-    }
-
-    private static boolean isCapturedFirearmAim(Object character) {
-        if (character == null || !isViewEnabled() || isFreeCursor() || isThirdPersonVehicle()) {
-            return false;
-        }
-        Object cameraCharacter = callObject("zombie.iso.IsoCamera", "getCameraCharacter");
-        if (cameraCharacter != character) {
-            return false;
-        }
-        try {
-            if (firearmCharacterClass != character.getClass()) {
-                firearmCharacterClass = character.getClass();
-                firearmAimingMethod = publicMethod(firearmCharacterClass, "isAiming");
-                primaryHandItemMethod = publicMethod(firearmCharacterClass, "getPrimaryHandItem");
-            }
-            if (firearmAimingMethod == null || primaryHandItemMethod == null
-                    || !Boolean.TRUE.equals(firearmAimingMethod.invoke(character))) {
-                return false;
-            }
-            Object weapon = primaryHandItemMethod.invoke(character);
-            Method ranged = weapon == null ? null : publicMethod(weapon.getClass(), "isRanged");
-            return ranged != null && Boolean.TRUE.equals(ranged.invoke(weapon));
-        } catch (Throwable ignored) {
-            return false;
-        }
+        return isViewEnabled() && (isFreeCursor() || isThirdPersonVehicle());
     }
 
     public static boolean overrideMouseCursorUpdate(boolean original) {
@@ -973,51 +281,29 @@ public final class Bridge {
 
     public static boolean overrideMouseCursorVisibility(boolean original) {
         recordHook(9, "Mouse.isCursorVisible", original);
-        return isViewEnabled() ? false : original;
+        if (!isViewEnabled()) {
+            return original;
+        }
+        boolean visible = isFreeCursor() && !isThirdPersonVehicle();
+        if (debugLogging) {
+            if (visible) {
+                mouseCursorVisibleCalls++;
+            } else {
+                mouseCursorHiddenCalls++;
+            }
+        }
+        return visible;
     }
 
     private static boolean overrideMouseCursorUpdateInternal(boolean original) {
         if (isViewEnabled() && isFreeCursor()) {
-            return setSystemCursorMode(GLFW_CURSOR_HIDDEN);
+            return original;
         }
 
         if (!original && systemCursorHidden) {
             setSystemCursorMode(GLFW_CURSOR_NORMAL);
         }
         return original;
-    }
-
-    private static boolean shouldSkipReticle(boolean original) {
-        if (!isViewEnabled()) {
-            return original;
-        }
-        if (isFreeCursor() || isThirdPersonVehicle()) {
-            return true;
-        }
-
-        return false;
-    }
-
-    private static float getViewpointYaw() {
-        try {
-            if (lookYaw == null) {
-                lookYaw = field("viewpoint.input.Look", "yaw");
-            }
-            return lookYaw == null ? 0.0f : lookYaw.getFloat(null);
-        } catch (Throwable ignored) {
-            return 0.0f;
-        }
-    }
-
-    private static float getViewpointPitch() {
-        try {
-            if (lookPitch == null) {
-                lookPitch = field("viewpoint.input.Look", "pitch");
-            }
-            return lookPitch == null ? 0.0f : lookPitch.getFloat(null);
-        } catch (Throwable ignored) {
-            return 0.0f;
-        }
     }
 
     public static boolean isThirdPersonVehicle() {
@@ -1109,16 +395,16 @@ public final class Bridge {
         }
     }
 
-    private static void toggleView() {
+    private static boolean toggleView() {
         Object player = callObject("zombie.iso.IsoCamera", "getCameraCharacter");
         if (player == null) {
-            return;
+            return false;
         }
 
         Boolean supported = callBooleanObject("viewpoint.platform.BuildPin", "supported");
         if (Boolean.FALSE.equals(supported)) {
             call("viewpoint.platform.BuildPin", "reportRefused");
-            return;
+            return false;
         }
 
         boolean enabled = !isViewEnabled();
@@ -1132,6 +418,7 @@ public final class Bridge {
         }
         System.out.println("[Viewpoint Extended Support] first person "
                 + (enabled ? "on" : "off"));
+        return isViewEnabled() == enabled;
     }
 
     private static void setLook(Object player) {
@@ -1225,7 +512,8 @@ public final class Bridge {
                 return false;
             }
             if (mode == GLFW_CURSOR_HIDDEN && systemCursorHidden
-                    && systemCursorWindow == window) {
+                    && systemCursorWindow == window
+                    && readSystemCursorMode() == mode) {
                 return true;
             }
 
@@ -1379,16 +667,6 @@ public final class Bridge {
     private static Method method(String className, String methodName, Class<?>... types) {
         try {
             Method method = Class.forName(className).getDeclaredMethod(methodName, types);
-            method.setAccessible(true);
-            return method;
-        } catch (Throwable ignored) {
-            return null;
-        }
-    }
-
-    private static Method publicMethod(Class<?> type, String methodName, Class<?>... types) {
-        try {
-            Method method = type.getMethod(methodName, types);
             method.setAccessible(true);
             return method;
         } catch (Throwable ignored) {
