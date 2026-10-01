@@ -15,6 +15,7 @@ public final class Bridge {
     private static final int GLFW_CURSOR = 208897;
     private static final int GLFW_CURSOR_NORMAL = 212993;
     private static final int GLFW_CURSOR_HIDDEN = 212994;
+    private static final int HIDDEN_RETICLE_COORDINATE = -10000;
     private static final float THIRD_PERSON_ZOOM_STEP = 0.5f;
     private static final float THIRD_PERSON_ZOOM_MIN = -2.0f;
     private static final float THIRD_PERSON_ZOOM_MAX = 8.0f;
@@ -53,11 +54,6 @@ public final class Bridge {
     private static volatile Method getMouseWheelState;
     private static volatile Method isAimingMethod;
     private static volatile Method setTargetAimPitchMethod;
-    private static volatile Field isoReticleScreenX;
-    private static volatile Field isoReticleScreenY;
-    private static volatile Class<?> isoReticleShaderClass;
-    private static volatile Method getScreenWidth;
-    private static volatile Method getScreenHeight;
     private static volatile Method getMuzzlePosition;
     private static volatile Class<?> ballisticsMethodClass;
     private static volatile Field controllerCharacter;
@@ -74,6 +70,8 @@ public final class Bridge {
     private static volatile Field frameEyeX;
     private static volatile Field frameEyeY;
     private static volatile Field frameEyeZ;
+    private static volatile Field frameViewYaw;
+    private static volatile Field frameViewPitch;
     private static volatile Field spriteRendererInstance;
     private static volatile Method getMainStateIndex;
     private static volatile Method getAttackingWeapon;
@@ -97,6 +95,7 @@ public final class Bridge {
     private static volatile Object lastBallisticsController;
     private static final Vector3 cameraOrigin = new Vector3();
     private static final Vector3 cameraDirection = new Vector3();
+    private static final Vector3 cameraPhysicalDirection = new Vector3();
     private static final Vector3 cameraEndpoint = new Vector3();
     private static final Vector3 cameraTarget = new Vector3();
     private static final Vector3 centeredMuzzle = new Vector3();
@@ -289,39 +288,25 @@ public final class Bridge {
         return isViewEnabled();
     }
 
-    public static void centerIsoReticle(Object shader) {
-        if (shader == null || !isViewEnabled() || isFreeCursor() || isThirdPersonVehicle()) {
-            return;
+    public static int overrideAimingReticleX(int playerIndex, int original) {
+        if (!isViewEnabled() || isFreeCursor() || isThirdPersonVehicle()) {
+            return original;
         }
-
         try {
-            if (isoReticleShaderClass != shader.getClass()) {
-                isoReticleShaderClass = shader.getClass();
-                isoReticleScreenX = field(shader.getClass().getName(), "screenX");
-                isoReticleScreenY = field(shader.getClass().getName(), "screenY");
-            }
-            if (isoReticleScreenX == null || isoReticleScreenY == null) {
-                return;
-            }
-
-            if (getScreenWidth == null) {
-                getScreenWidth = method("zombie.iso.IsoCamera", "getScreenWidth", int.class);
-            }
-            if (getScreenHeight == null) {
-                getScreenHeight = method("zombie.iso.IsoCamera", "getScreenHeight", int.class);
-            }
-            if (getScreenWidth == null || getScreenHeight == null) {
-                return;
-            }
-
-            int width = ((Number) getScreenWidth.invoke(null, 0)).intValue();
-            int height = ((Number) getScreenHeight.invoke(null, 0)).intValue();
-            if (width <= 0 || height <= 0) {
-                return;
-            }
-            isoReticleScreenX.setInt(shader, width / 2);
-            isoReticleScreenY.setInt(shader, height / 2);
+            return HIDDEN_RETICLE_COORDINATE;
         } catch (Throwable ignored) {
+            return original;
+        }
+    }
+
+    public static int overrideAimingReticleY(int playerIndex, int original) {
+        if (!isViewEnabled() || isFreeCursor() || isThirdPersonVehicle()) {
+            return original;
+        }
+        try {
+            return HIDDEN_RETICLE_COORDINATE;
+        } catch (Throwable ignored) {
+            return original;
         }
     }
 
@@ -347,13 +332,13 @@ public final class Bridge {
             if (debugLogging && ballisticsMuzzleHookCalls == 1L) {
                 System.out.println("[Viewpoint Extended Support] PZ3D-style ballistics hook active");
             }
-            setViewpointAimDirection(direction, cameraDirection);
-            readViewpointCameraOrigin(muzzlePosition, cameraOrigin);
+            readViewpointCamera(muzzlePosition, cameraOrigin, cameraDirection,
+                    cameraPhysicalDirection);
 
             float range = getFirearmRange(controller);
-            float cameraDistance = range + distance(cameraOrigin, muzzlePosition);
-            setEndpoint(cameraOrigin, cameraDirection, cameraDistance, cameraEndpoint);
-            updateBulletAim(controller, cameraOrigin, cameraDirection);
+            float cameraDistance = range + physicalDistance(cameraOrigin, muzzlePosition);
+            setEndpoint(cameraOrigin, cameraPhysicalDirection, cameraDistance, cameraEndpoint);
+            updateBulletAim(controller, cameraOrigin, cameraPhysicalDirection);
             selectCameraTarget(controller, cameraDistance, cameraEndpoint);
 
             applyPz3dMuzzleCorrection(cameraOrigin, cameraDirection, cameraEndpoint,
@@ -385,9 +370,9 @@ public final class Bridge {
                 return;
             }
 
-            readViewpointCameraOrigin(muzzlePosition, cameraOrigin);
-            setViewpointAimDirection(muzzlePosition, cameraDirection);
-            updateBulletAim(controller, cameraOrigin, cameraDirection);
+            readViewpointCamera(muzzlePosition, cameraOrigin, cameraDirection,
+                    cameraPhysicalDirection);
+            updateBulletAim(controller, cameraOrigin, cameraPhysicalDirection);
 
             if (lastBallisticsController == controller) {
                 setIsoAimingPosition(controller, cameraEndpoint);
@@ -455,20 +440,25 @@ public final class Bridge {
         normalize(result);
     }
 
-    private static void readViewpointCameraOrigin(Vector3 fallback, Vector3 result) {
+    private static void readViewpointCamera(Vector3 fallbackOrigin,
+                                            Vector3 originResult,
+                                            Vector3 directionResult,
+                                            Vector3 physicalDirectionResult) {
         try {
             if (viewpointFrames == null) {
                 viewpointFrames = field("viewpoint.FP", "frames");
             }
             if (viewpointFrames == null) {
-                result.set(fallback.x, fallback.y, fallback.z);
+                setFallbackCamera(fallbackOrigin, originResult, directionResult,
+                        physicalDirectionResult);
                 return;
             }
 
             Object frames = viewpointFrames.get(null);
             if (frames == null || !frames.getClass().isArray()
                     || java.lang.reflect.Array.getLength(frames) == 0) {
-                result.set(fallback.x, fallback.y, fallback.z);
+                setFallbackCamera(fallbackOrigin, originResult, directionResult,
+                        physicalDirectionResult);
                 return;
             }
 
@@ -485,7 +475,8 @@ public final class Bridge {
             index = Math.max(0, Math.min(index, java.lang.reflect.Array.getLength(frames) - 1));
             Object frame = java.lang.reflect.Array.get(frames, index);
             if (frame == null) {
-                result.set(fallback.x, fallback.y, fallback.z);
+                setFallbackCamera(fallbackOrigin, originResult, directionResult,
+                        physicalDirectionResult);
                 return;
             }
 
@@ -496,20 +487,52 @@ public final class Bridge {
                 frameEyeX = field(frame.getClass().getName(), "eyeX");
                 frameEyeY = field(frame.getClass().getName(), "eyeY");
                 frameEyeZ = field(frame.getClass().getName(), "eyeZ");
+                frameViewYaw = field(frame.getClass().getName(), "viewYaw");
+                frameViewPitch = field(frame.getClass().getName(), "viewPitch");
             }
             if (frameCamX == null || frameCamY == null || frameCamZ == null
-                    || frameEyeX == null || frameEyeY == null || frameEyeZ == null) {
-                result.set(fallback.x, fallback.y, fallback.z);
+                    || frameEyeX == null || frameEyeY == null || frameEyeZ == null
+                    || frameViewYaw == null || frameViewPitch == null) {
+                setFallbackCamera(fallbackOrigin, originResult, directionResult,
+                        physicalDirectionResult);
                 return;
             }
 
-            result.set(frameCamX.getFloat(frame) + frameEyeX.getFloat(frame),
+            originResult.set(frameCamX.getFloat(frame) + frameEyeX.getFloat(frame),
                     frameCamY.getFloat(frame) + frameEyeZ.getFloat(frame),
                     frameCamZ.getFloat(frame) + frameEyeY.getFloat(frame)
                             / VIEWPOINT_VERTICAL_SCALE);
+            setViewpointDirection(frameViewYaw.getFloat(frame), frameViewPitch.getFloat(frame),
+                    directionResult, physicalDirectionResult);
         } catch (Throwable ignored) {
-            result.set(fallback.x, fallback.y, fallback.z);
+            setFallbackCamera(fallbackOrigin, originResult, directionResult,
+                    physicalDirectionResult);
         }
+    }
+
+    private static void setFallbackCamera(Vector3 fallbackOrigin,
+                                          Vector3 originResult,
+                                          Vector3 directionResult,
+                                          Vector3 physicalDirectionResult) {
+        originResult.set(fallbackOrigin.x, fallbackOrigin.y, fallbackOrigin.z);
+        setViewpointAimDirection(fallbackOrigin, directionResult);
+        physicalDirectionResult.set(directionResult.x, directionResult.y,
+                directionResult.z * VIEWPOINT_VERTICAL_SCALE);
+        normalize(physicalDirectionResult);
+    }
+
+    private static void setViewpointDirection(float yaw, float pitch,
+                                              Vector3 directionResult,
+                                              Vector3 physicalDirectionResult) {
+        float horizontal = (float) Math.cos(pitch);
+        physicalDirectionResult.set((float) Math.cos(yaw) * horizontal,
+                (float) Math.sin(yaw) * horizontal,
+                (float) Math.sin(pitch));
+        normalize(physicalDirectionResult);
+        directionResult.set(physicalDirectionResult.x,
+                physicalDirectionResult.y,
+                physicalDirectionResult.z / VIEWPOINT_VERTICAL_SCALE);
+        normalize(directionResult);
     }
 
     private static boolean isViewpointFirearmController(Object controller) {
@@ -630,10 +653,10 @@ public final class Bridge {
 
             Vector3 candidate = cameraTarget;
             candidate.set(targets[1], targets[3], targets[2] / VIEWPOINT_VERTICAL_SCALE);
-            float along = dot(candidate.x - cameraOrigin.x,
-                    candidate.y - cameraOrigin.y,
-                    candidate.z - cameraOrigin.z,
-                    cameraDirection);
+            float along = dot(targets[1] - cameraOrigin.x,
+                    targets[3] - cameraOrigin.y,
+                    targets[2] - cameraOrigin.z * VIEWPOINT_VERTICAL_SCALE,
+                    cameraPhysicalDirection);
             if (along > 0.0f) {
                 endpoint.set(candidate.x, candidate.y, candidate.z);
                 ballisticsCameraTargetCount++;
@@ -655,7 +678,7 @@ public final class Bridge {
         }
     }
 
-    private static void updateBulletAim(Object controller, Vector3 origin, Vector3 direction) {
+    private static void updateBulletAim(Object controller, Vector3 origin, Vector3 physicalDirection) {
         try {
             if (getControllerId == null) {
                 return;
@@ -671,9 +694,10 @@ public final class Bridge {
                         float.class, float.class, float.class, float.class);
             }
             if (bulletReticlePosition != null) {
-                bulletReticlePosition.invoke(null, id, origin.x, origin.z, origin.y);
+                bulletReticlePosition.invoke(null, id, origin.x,
+                        origin.z * VIEWPOINT_VERTICAL_SCALE, origin.y);
             }
-            updateBulletQuaternion(id, direction);
+            updateBulletQuaternion(id, physicalDirection);
         } catch (Throwable ignored) {
         }
     }
@@ -708,7 +732,7 @@ public final class Bridge {
             }
 
             Object physicalDirection = jomlVectorConstructor.newInstance(
-                    direction.x, direction.z * VIEWPOINT_VERTICAL_SCALE, direction.y);
+                    direction.x, direction.z, direction.y);
             float upX = 0.0f;
             float upY = Math.abs(direction.z) < 0.999f ? 1.0f : 0.0f;
             float upZ = Math.abs(direction.z) < 0.999f ? 0.0f : 1.0f;
@@ -736,11 +760,11 @@ public final class Bridge {
         }
     }
 
-    private static void setEndpoint(Vector3 origin, Vector3 direction,
+    private static void setEndpoint(Vector3 origin, Vector3 physicalDirection,
                                     float distance, Vector3 endpoint) {
-        endpoint.set(origin.x + direction.x * distance,
-                origin.y + direction.y * distance,
-                origin.z + direction.z * distance);
+        endpoint.set(origin.x + physicalDirection.x * distance,
+                origin.y + physicalDirection.y * distance,
+                origin.z + physicalDirection.z * distance / VIEWPOINT_VERTICAL_SCALE);
     }
 
     private static void setDirectionFromTo(Vector3 origin, Vector3 endpoint, Vector3 result) {
@@ -748,10 +772,10 @@ public final class Bridge {
         normalize(result);
     }
 
-    private static float distance(Vector3 first, Vector3 second) {
-        float x = first.x - second.x;
-        float y = first.y - second.y;
-        float z = first.z - second.z;
+    private static float physicalDistance(Vector3 firstIso, Vector3 secondIso) {
+        float x = firstIso.x - secondIso.x;
+        float y = firstIso.y - secondIso.y;
+        float z = (firstIso.z - secondIso.z) * VIEWPOINT_VERTICAL_SCALE;
         return (float) Math.sqrt(x * x + y * y + z * z);
     }
 

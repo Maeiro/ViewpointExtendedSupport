@@ -3,6 +3,7 @@ package maeiro.viewpointextendedsupport;
 import viewpoint.Compat;
 import viewpoint.FP;
 import viewpoint.core.View;
+import viewpoint.core.Frame;
 import viewpoint.input.Look;
 import viewpoint.input.ThirdPerson;
 import zombie.input.GameKeyboard;
@@ -66,10 +67,10 @@ public final class BridgeTest {
         check(!Bridge.shouldSkipViewpointReticle(false), "captured Viewpoint reticle must remain available");
         check(Bridge.shouldSkipViewpointCrosshair(), "the Viewpoint center pixel must be replaced by the native reticle");
 
-        ReticleShader shader = new ReticleShader();
-        Bridge.centerIsoReticle(shader);
-        check(shader.screenX == 640 && shader.screenY == 360,
-                "the native reticle must be centered in the viewport");
+        check(Bridge.overrideAimingReticleX(0, 123) == -10000,
+                "the vanilla reticle X must be hidden while the native reticle is active");
+        check(Bridge.overrideAimingReticleY(0, 123) == -10000,
+                "the vanilla reticle Y must be hidden while the native reticle is active");
 
         zombie.core.Core core = zombie.core.Core.getInstance();
         check(core.showReticleTexture, "Viewpoint must preserve the vanilla reticle texture");
@@ -126,6 +127,17 @@ public final class BridgeTest {
         check(controller.isoAimingPosition.x == 4.0f
                         && controller.isoAimingPosition.z == 0.0f,
                 "ballistics hook must use the native camera target as the 3D aim position");
+
+        Frame frame = new Frame();
+        frame.viewPitch = -0.5f;
+        FP.frames = new Frame[]{frame};
+        Look.pitch = 0.0f;
+        muzzlePosition.set(0.0f, 0.0f, 1.0f);
+        muzzleDirection.set(1.0f, 0.0f, 0.0f);
+        Bridge.adjustViewpointMuzzle(controller, muzzlePosition, muzzleDirection);
+        check(muzzleDirection.z < -0.2f,
+                "ballistics hook must use the rendered frame pitch instead of the stale input pitch");
+        FP.frames = null;
         IsoCamera.character = originalCamera;
         ThirdPerson.active = true;
 
@@ -199,11 +211,6 @@ public final class BridgeTest {
 
     private static void check(boolean condition, String message) {
         if (!condition) throw new AssertionError(message);
-    }
-
-    private static final class ReticleShader {
-        private int screenX;
-        private int screenY;
     }
 
     private static final class FakeBallisticsController {

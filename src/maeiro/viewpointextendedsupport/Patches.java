@@ -95,12 +95,21 @@ public final class Patches {
         }
     }
 
-    @Patch(className = "zombie.iso.sprite.IsoReticle$IsoReticleShader",
-            methodName = "accept", warmUp = true)
-    public static class CenterIsoReticle {
-        @Patch.OnEnter
-        public static void enter(@Patch.This(readOnly = true) Object shader) {
-            Bridge.centerIsoReticle(shader);
+    @Patch(className = "zombie.input.AimingReticle", methodName = "getXA", warmUp = true)
+    public static class ViewpointReticleX {
+        @Patch.OnExit
+        public static void exit(@Patch.Argument(value = 0, readOnly = true) int playerIndex,
+                                @Patch.Return(readOnly = false) int result) {
+            result = Bridge.overrideAimingReticleX(playerIndex, result);
+        }
+    }
+
+    @Patch(className = "zombie.input.AimingReticle", methodName = "getYA", warmUp = true)
+    public static class ViewpointReticleY {
+        @Patch.OnExit
+        public static void exit(@Patch.Argument(value = 0, readOnly = true) int playerIndex,
+                                @Patch.Return(readOnly = false) int result) {
+            result = Bridge.overrideAimingReticleY(playerIndex, result);
         }
     }
 
