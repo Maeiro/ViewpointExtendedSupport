@@ -6,6 +6,7 @@ public final class ColorInfo {
     public final float g;
     public final float b;
     public final float a;
+    public int packed;
 
     public ColorInfo(String name) {
         this.name = name;
@@ -21,5 +22,10 @@ public final class ColorInfo {
         this.g = g;
         this.b = b;
         this.a = a;
+    }
+
+    public ColorInfo setABGR(int color) {
+        packed = color;
+        return this;
     }
 }

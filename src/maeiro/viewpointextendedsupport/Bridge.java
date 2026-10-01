@@ -4,6 +4,8 @@ import java.lang.reflect.Field;
 import java.lang.reflect.Method;
 
 import me.zed_0xff.zombie_buddy.Exposer;
+import zombie.core.physics.BallisticsController;
+import zombie.iso.Vector2;
 import zombie.iso.Vector3;
 
 @Exposer.LuaClass(name = "ViewpointExtendedSupport")
@@ -101,6 +103,11 @@ public final class Bridge {
     private static final Vector3 centeredMuzzle = new Vector3();
     private static final float[] thirdPersonEye = new float[3];
     private static volatile boolean crosshairTarget;
+    private static volatile boolean firearmAiming;
+    private static volatile int cameraTargetId = -1;
+    private static volatile Class<?> firearmCharacterClass;
+    private static volatile Method primaryHandItemMethod;
+    private static volatile Method firearmAimingMethod;
     private static volatile Class<?> vehicleMethodClass;
     private static volatile Class<?> aimMethodClass;
     private static volatile Method getDisplayWindow;
@@ -161,6 +168,7 @@ public final class Bridge {
     }
 
     public static void diagnosticTick() {
+        refreshFirearmAiming();
         if (!debugLogging) {
             return;
         }
@@ -245,7 +253,9 @@ public final class Bridge {
         setBoolean(viewEnabled, "viewpoint.core.View", "enabled", enabled);
         if (!enabled) {
             crosshairTarget = false;
+            firearmAiming = false;
             lastBallisticsController = null;
+            FirearmTargetOutline.clear();
         }
     }
 
@@ -298,7 +308,7 @@ public final class Bridge {
         if (isFreeCursor() || isThirdPersonVehicle()) {
             return true;
         }
-        return Crosshair.draw(crosshairTarget);
+        return firearmAiming && Crosshair.draw(crosshairTarget);
     }
 
     public static int overrideAimingReticleX(int playerIndex, int original) {
@@ -353,12 +363,19 @@ public final class Bridge {
             setEndpoint(cameraOrigin, cameraPhysicalDirection, cameraDistance, cameraEndpoint);
             updateBulletAim(controller, cameraOrigin, cameraPhysicalDirection);
             cameraTarget.set(cameraEndpoint.x, cameraEndpoint.y, cameraEndpoint.z);
-            crosshairTarget = selectCameraTarget(controller, cameraDistance, cameraTarget);
-
+            boolean targetFound = selectCameraTarget(controller, cameraDistance, cameraTarget);
+            Object character = getControllerCharacter(controller);
+            firearmAiming = isCapturedFirearmAim(character);
+            crosshairTarget = firearmAiming && targetFound;
             applyPz3dMuzzleCorrection(cameraOrigin, cameraDirection, cameraTarget,
                     muzzlePosition, direction, isThirdPerson());
             setIsoAimingPosition(controller, cameraEndpoint);
             lastBallisticsController = controller;
+            if (crosshairTarget) {
+                FirearmTargetOutline.update(character, cameraTargetId);
+            } else {
+                FirearmTargetOutline.clear();
+            }
         } catch (Throwable error) {
             reportBallisticsFailure("muzzle", error);
         }
@@ -674,6 +691,7 @@ public final class Bridge {
     }
 
     private static boolean selectCameraTarget(Object controller, float maxDistance, Vector3 endpoint) {
+        cameraTargetId = -1;
         try {
             if (getCameraTargets == null || getNumberOfCameraTargets == null
                     || getCameraTargetsArray == null) {
@@ -701,6 +719,7 @@ public final class Bridge {
             float offAxisSquared = dx * dx + dy * dy + dz * dz - along * along;
             if (along > 0.0f && along <= maxDistance && offAxisSquared <= 0.1225f) {
                 endpoint.set(candidate.x, candidate.y, candidate.z);
+                cameraTargetId = (int) targets[0];
                 ballisticsCameraTargetCount++;
                 return true;
             }
@@ -871,6 +890,69 @@ public final class Bridge {
             setTargetAimPitchMethod.invoke(player,
                     (float) Math.toDegrees(getViewpointPitch()));
         } catch (Throwable ignored) {
+        }
+    }
+
+    public static void overrideCalculatedAimVector(Object player, Vector2 result) {
+        if (result == null || !isCapturedFirearmAim(player)) {
+            return;
+        }
+        float yaw = getViewpointYaw();
+        result.set((float) Math.cos(yaw), (float) Math.sin(yaw));
+    }
+
+    public static void stabilizeAimVector(Object controller,
+                                          BallisticsController.AimingVectorParameters parameters,
+                                          boolean valid) {
+        if (!valid || parameters == null
+                || !isCapturedFirearmAim(getControllerCharacter(controller))) {
+            return;
+        }
+
+        float yaw = getViewpointYaw();
+        float pitch = getViewpointPitch();
+        float horizontal = (float) Math.cos(pitch);
+        float x = (float) Math.cos(yaw);
+        float y = (float) Math.sin(yaw);
+        parameters.desiredForward.set(x * horizontal, y * horizontal,
+                (float) Math.sin(pitch) / VIEWPOINT_VERTICAL_SCALE);
+        parameters.desiredForward.normalize();
+        parameters.desiredForward2f.set(x, y);
+        parameters.desiredForwardPitchRads = pitch;
+    }
+
+    private static void refreshFirearmAiming() {
+        firearmAiming = isCapturedFirearmAim(
+                callObject("zombie.iso.IsoCamera", "getCameraCharacter"));
+        if (!firearmAiming) {
+            crosshairTarget = false;
+            FirearmTargetOutline.clear();
+        }
+    }
+
+    private static boolean isCapturedFirearmAim(Object character) {
+        if (character == null || !isViewEnabled() || isFreeCursor() || isThirdPersonVehicle()) {
+            return false;
+        }
+        Object cameraCharacter = callObject("zombie.iso.IsoCamera", "getCameraCharacter");
+        if (cameraCharacter != character) {
+            return false;
+        }
+        try {
+            if (firearmCharacterClass != character.getClass()) {
+                firearmCharacterClass = character.getClass();
+                firearmAimingMethod = publicMethod(firearmCharacterClass, "isAiming");
+                primaryHandItemMethod = publicMethod(firearmCharacterClass, "getPrimaryHandItem");
+            }
+            if (firearmAimingMethod == null || primaryHandItemMethod == null
+                    || !Boolean.TRUE.equals(firearmAimingMethod.invoke(character))) {
+                return false;
+            }
+            Object weapon = primaryHandItemMethod.invoke(character);
+            Method ranged = weapon == null ? null : publicMethod(weapon.getClass(), "isRanged");
+            return ranged != null && Boolean.TRUE.equals(ranged.invoke(weapon));
+        } catch (Throwable ignored) {
+            return false;
         }
     }
 

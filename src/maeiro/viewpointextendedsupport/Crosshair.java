@@ -30,7 +30,7 @@ final class Crosshair {
             clear(x - 2, y + 1, 4, 9);
 
             if (target) {
-                GL11.glClearColor(0.22f, 0.18f, 1.0f, 1.0f);
+                GL11.glClearColor(1.0f, 0.12f, 0.08f, 1.0f);
             } else {
                 GL11.glClearColor(1.0f, 1.0f, 1.0f, 1.0f);
             }

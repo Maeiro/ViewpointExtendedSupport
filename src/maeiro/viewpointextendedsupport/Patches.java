@@ -1,6 +1,8 @@
 package maeiro.viewpointextendedsupport;
 
 import me.zed_0xff.zombie_buddy.Patch;
+import zombie.core.physics.BallisticsController;
+import zombie.iso.Vector2;
 import zombie.iso.Vector3;
 
 public final class Patches {
@@ -130,6 +132,37 @@ public final class Patches {
         @Patch.OnExit
         public static void exit(@Patch.This(readOnly = true) Object controller) {
             Bridge.syncViewpointBallisticsCamera(controller);
+        }
+    }
+
+    @Patch(className = "zombie.core.physics.BallisticsController",
+            methodName = "updateAimingVector", warmUp = true)
+    public static class ViewpointBallisticsAimVector {
+        @Patch.OnExit
+        public static void exit(@Patch.This(readOnly = true) Object controller,
+                                @Patch.Argument(value = 1, readOnly = true)
+                                BallisticsController.AimingVectorParameters parameters,
+                                @Patch.Return(readOnly = true) boolean result) {
+            Bridge.stabilizeAimVector(controller, parameters, result);
+        }
+    }
+
+    @Patch(className = "zombie.characters.IsoPlayer",
+            methodName = "calculateAimVector", warmUp = true)
+    public static class ViewpointCalculatedAimVector {
+        @Patch.OnExit
+        public static void exit(@Patch.This(readOnly = true) Object player,
+                                @Patch.Return(readOnly = true) Vector2 result) {
+            Bridge.overrideCalculatedAimVector(player, result);
+        }
+    }
+
+    @Patch(className = "zombie.characters.IsoPlayer", methodName = "getAimVector", warmUp = true)
+    public static class ViewpointAimVector {
+        @Patch.OnExit
+        public static void exit(@Patch.This(readOnly = true) Object player,
+                                @Patch.Return(readOnly = true) Vector2 result) {
+            Bridge.overrideCalculatedAimVector(player, result);
         }
     }
 

@@ -11,6 +11,8 @@ import zombie.input.Mouse;
 import org.lwjgl.glfw.GLFW;
 import zombie.iso.IsoCamera;
 import zombie.iso.Vector3;
+import zombie.iso.Vector2;
+import zombie.core.physics.BallisticsController;
 import zombie.core.physics.Bullet;
 import org.lwjgl.opengl.GL11;
 
@@ -67,12 +69,8 @@ public final class BridgeTest {
         check(!Bridge.overrideMouseCursorVisibility(true), "captured Viewpoint mode must hide custom cursor texture");
         check(!Bridge.shouldSkipVanillaReticle(false), "captured mode must keep vanilla reticle");
         check(!Bridge.shouldSkipViewpointReticle(false), "captured Viewpoint reticle must remain available");
-        check(Bridge.shouldSkipViewpointCrosshair(), "the PZ3D-style crosshair must replace the Viewpoint pixel");
-        check(GL11.clears == 10, "the crosshair must draw its center and four arms");
-        GL11.viewportWidth = 0;
         check(!Bridge.shouldSkipViewpointCrosshair(),
-                "a missing render viewport must fall back to Viewpoint's visible center pixel");
-        GL11.viewportWidth = 1920;
+                "Viewpoint's white center pixel must remain visible without firearm aiming");
 
         check(Bridge.overrideAimingReticleX(0, 123) == -10000,
                 "the vanilla reticle X must be hidden while the native reticle is active");
@@ -128,6 +126,14 @@ public final class BridgeTest {
         FakeBallisticsController controller = new FakeBallisticsController(character);
         IsoCamera.character = character;
         ThirdPerson.active = false;
+        Bridge.diagnosticTick();
+        check(Bridge.shouldSkipViewpointCrosshair(),
+                "the larger crosshair must be shown while aiming a firearm");
+        check(GL11.clears == 10, "the firearm crosshair must draw its center and four arms");
+        GL11.viewportWidth = 0;
+        check(!Bridge.shouldSkipViewpointCrosshair(),
+                "a missing render viewport must fall back to Viewpoint's visible center pixel");
+        GL11.viewportWidth = 1920;
         muzzlePosition.set(0.0f, 0.0f, 1.0f);
         muzzleDirection.set(1.0f, 0.0f, 0.0f);
         Look.yaw = 0.0f;
@@ -140,6 +146,32 @@ public final class BridgeTest {
         check(controller.isoAimingPosition.x > 7.0f
                         && controller.isoAimingPosition.z > 0.0f,
                 "the 3D aiming position must remain on the camera ray, not snap to a nearby target");
+        Vector2 calculatedAim = new Vector2();
+        calculatedAim.set(0.0f, 1.0f);
+        Bridge.overrideCalculatedAimVector(character, calculatedAim);
+        check(calculatedAim.x > 0.99f && Math.abs(calculatedAim.y) < 0.001f,
+                "the animation aim vector must follow camera yaw instead of a nearby zombie");
+        BallisticsController.AimingVectorParameters aimParameters =
+                new BallisticsController.AimingVectorParameters();
+        aimParameters.desiredForward2f.set(0.0f, 1.0f);
+        Bridge.stabilizeAimVector(controller, aimParameters, true);
+        check(aimParameters.desiredForward2f.x > 0.99f
+                        && Math.abs(aimParameters.desiredForward2f.y) < 0.001f
+                        && Math.abs(aimParameters.desiredForwardPitchRads - Look.pitch) < 0.001f,
+                "ballistics animation output must use the camera ray even with an acquired target");
+        aimParameters.desiredForward2f.set(0.0f, 1.0f);
+        Bridge.stabilizeAimVector(controller, aimParameters, false);
+        check(aimParameters.desiredForward2f.y == 1.0f,
+                "invalid ballistics output must keep the game's original fallback behavior");
+        Look.yaw = (float) (Math.PI / 2.0);
+        Look.pitch = -0.5f;
+        Bridge.stabilizeAimVector(controller, aimParameters, true);
+        check(Math.abs(aimParameters.desiredForward2f.x) < 0.001f
+                        && aimParameters.desiredForward2f.y > 0.99f
+                        && aimParameters.desiredForward.z < -0.1f,
+                "turning and looking down must rotate the entire aiming pose with the camera");
+        Look.yaw = 0.0f;
+        Look.pitch = -0.3f;
 
         Frame frame = new Frame();
         frame.camX = 10.0f;
@@ -204,8 +236,23 @@ public final class BridgeTest {
         muzzlePosition.set(0.0f, 0.0f, 1.0f);
         Bridge.adjustViewpointMuzzle(controller, muzzlePosition, muzzleDirection);
         check(Bridge.shouldSkipViewpointCrosshair()
-                        && GL11.red < 0.3f && GL11.green < 0.3f && GL11.blue == 1.0f,
-                "a target intersecting the camera ray must activate PZ3D-style target feedback");
+                        && GL11.red == 1.0f && GL11.green < 0.3f && GL11.blue < 0.3f,
+                "a target intersecting the camera ray must make the firearm crosshair red");
+        character.aiming = false;
+        Bridge.diagnosticTick();
+        check(!Bridge.shouldSkipViewpointCrosshair(),
+                "releasing aim must immediately restore Viewpoint's white dot");
+        calculatedAim.set(0.0f, 1.0f);
+        Bridge.overrideCalculatedAimVector(character, calculatedAim);
+        check(calculatedAim.y == 1.0f,
+                "camera-direction animation override must stop when aim is released");
+        character.aiming = true;
+        character.weapon.ranged = false;
+        Bridge.diagnosticTick();
+        check(!Bridge.shouldSkipViewpointCrosshair(),
+                "melee and non-firearm equipment must keep Viewpoint's white dot");
+        character.weapon.ranged = true;
+        Bridge.diagnosticTick();
         IsoCamera.character = originalCamera;
         ThirdPerson.active = true;
 
@@ -320,15 +367,26 @@ public final class BridgeTest {
 
     private static final class FakeCharacter {
         private final FakeWeapon weapon = new FakeWeapon();
+        private boolean aiming = true;
 
         public FakeWeapon getAttackingWeapon() {
             return weapon;
         }
+
+        public FakeWeapon getPrimaryHandItem() {
+            return weapon;
+        }
+
+        public boolean isAiming() {
+            return aiming;
+        }
     }
 
     private static final class FakeWeapon {
+        private boolean ranged = true;
+
         public boolean isRanged() {
-            return true;
+            return ranged;
         }
 
         public float getMaxRange(FakeCharacter character) {
