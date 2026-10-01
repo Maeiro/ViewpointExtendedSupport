@@ -11,6 +11,8 @@ import zombie.input.Mouse;
 import org.lwjgl.glfw.GLFW;
 import zombie.iso.IsoCamera;
 import zombie.iso.Vector3;
+import zombie.core.physics.Bullet;
+import org.lwjgl.opengl.GL11;
 
 public final class BridgeTest {
     public static void main(String[] args) {
@@ -65,7 +67,12 @@ public final class BridgeTest {
         check(!Bridge.overrideMouseCursorVisibility(true), "captured Viewpoint mode must hide custom cursor texture");
         check(!Bridge.shouldSkipVanillaReticle(false), "captured mode must keep vanilla reticle");
         check(!Bridge.shouldSkipViewpointReticle(false), "captured Viewpoint reticle must remain available");
-        check(Bridge.shouldSkipViewpointCrosshair(), "the Viewpoint center pixel must be replaced by the native reticle");
+        check(Bridge.shouldSkipViewpointCrosshair(), "the PZ3D-style crosshair must replace the Viewpoint pixel");
+        check(GL11.clears == 10, "the crosshair must draw its center and four arms");
+        GL11.viewportWidth = 0;
+        check(!Bridge.shouldSkipViewpointCrosshair(),
+                "a missing render viewport must fall back to Viewpoint's visible center pixel");
+        GL11.viewportWidth = 1920;
 
         check(Bridge.overrideAimingReticleX(0, 123) == -10000,
                 "the vanilla reticle X must be hidden while the native reticle is active");
@@ -105,6 +112,9 @@ public final class BridgeTest {
                         && muzzlePosition.z < 1.6f
                         && muzzlePosition.x > 0.0f,
                 "first-person muzzle origin must be centered on the camera ray");
+        check(Math.abs(muzzlePosition.z - cameraOrigin.z
+                        - cameraDirection.z * muzzlePosition.x / cameraDirection.x) < 0.001f,
+                "muzzle centering must use the same physical-height scale as the camera ray");
 
         muzzlePosition.set(0.0f, 0.0f, 1.0f);
         muzzleDirection.set(1.0f, 0.0f, 0.0f);
@@ -120,24 +130,82 @@ public final class BridgeTest {
         ThirdPerson.active = false;
         muzzlePosition.set(0.0f, 0.0f, 1.0f);
         muzzleDirection.set(1.0f, 0.0f, 0.0f);
+        Look.yaw = 0.0f;
         Look.pitch = -0.3f;
         Bridge.adjustViewpointMuzzle(controller, muzzlePosition, muzzleDirection);
-        check(muzzleDirection.z < -0.2f,
+        check(muzzleDirection.z < -0.1f,
                 "ballistics hook must mutate the live muzzle direction");
-        check(controller.isoAimingPosition.x == 4.0f
-                        && controller.isoAimingPosition.z == 0.0f,
-                "ballistics hook must use the native camera target as the 3D aim position");
+        check(Bullet.positionUpdates > 0 && Bullet.rotationUpdates > 0,
+                "the PZ3D camera ray must reach Bullet's native reticle position and rotation");
+        check(controller.isoAimingPosition.x > 7.0f
+                        && controller.isoAimingPosition.z > 0.0f,
+                "the 3D aiming position must remain on the camera ray, not snap to a nearby target");
 
         Frame frame = new Frame();
+        frame.camX = 10.0f;
+        frame.camY = 20.0f;
+        frame.camZ = 1.0f;
+        frame.eyeX = 2.0f;
+        frame.eyeY = 2.4494896f;
+        frame.eyeZ = 3.0f;
+        frame.viewYaw = 1.57f;
         frame.viewPitch = -0.5f;
         FP.frames = new Frame[]{frame};
         Look.pitch = 0.0f;
+        Vector3 frameOrigin = new Vector3();
+        Vector3 frameDirection = new Vector3();
+        Vector3 physicalDirection = new Vector3();
+        Bridge.readViewpointCamera(muzzlePosition, frameOrigin, frameDirection,
+                physicalDirection);
+        check(Math.abs(frameOrigin.x - 8.12f) < 0.001f
+                        && Math.abs(frameOrigin.y - 17.0f) < 0.001f
+                        && Math.abs(frameOrigin.z - 2.0f) < 0.001f
+                        && frameDirection.x > 0.99f,
+                "camera ray must invert render-space offsets and use the live yaw");
+        ThirdPerson.active = true;
+        Bridge.readViewpointCamera(muzzlePosition, frameOrigin, frameDirection,
+                physicalDirection);
+        check(Math.abs(frameOrigin.x - 9.0f) < 0.001f
+                        && Math.abs(frameOrigin.y - 18.0f) < 0.001f
+                        && Math.abs(frameOrigin.z - 2.0f) < 0.001f,
+                "third-person ballistics must use Viewpoint's collision-adjusted camera eye");
+        ThirdPerson.active = false;
         muzzlePosition.set(0.0f, 0.0f, 1.0f);
         muzzleDirection.set(1.0f, 0.0f, 0.0f);
         Bridge.adjustViewpointMuzzle(controller, muzzlePosition, muzzleDirection);
-        check(muzzleDirection.z < -0.2f,
-                "ballistics hook must use the rendered frame pitch instead of the stale input pitch");
+        check(Math.abs(muzzleDirection.z) < 0.001f,
+                "ballistics hook must use the live Viewpoint look pitch used to render the frame");
+        check(Math.abs(Bullet.aimX - 8.12f) < 0.001f
+                        && Math.abs(Bullet.aimY - 17.0f) < 0.001f
+                        && Math.abs(Bullet.aimHeight - 4.898979f) < 0.001f,
+                "Bullet's reticle origin must match the rendered camera in physical coordinates");
         FP.frames = null;
+
+        Look.pitch = 0.0f;
+        Look.yaw = 0.0f;
+        Vector3 fallbackOrigin = new Vector3(100.0f, 50.0f, 1.0f);
+        Bridge.readViewpointCamera(fallbackOrigin, frameOrigin, frameDirection,
+                physicalDirection);
+        check(frameDirection.x > 0.99f && Math.abs(frameDirection.y) < 0.001f,
+                "camera fallback must use look yaw instead of world-position coordinates");
+
+        ThirdPerson.active = true;
+        controller.cameraTargets[1] = 4.0f;
+        controller.cameraTargets[2] = 2.4494896f;
+        controller.cameraTargets[3] = 2.0f;
+        muzzlePosition.set(0.0f, 0.0f, 1.0f);
+        muzzleDirection.set(1.0f, 0.0f, 0.0f);
+        Bridge.adjustViewpointMuzzle(controller, muzzlePosition, muzzleDirection);
+        check(Math.abs(muzzleDirection.y) < 0.001f
+                        && Math.abs(controller.isoAimingPosition.y) < 0.001f,
+                "an off-axis zombie must not pull the projectile or aim point away from the reticle");
+
+        controller.cameraTargets[3] = 0.0f;
+        muzzlePosition.set(0.0f, 0.0f, 1.0f);
+        Bridge.adjustViewpointMuzzle(controller, muzzlePosition, muzzleDirection);
+        check(Bridge.shouldSkipViewpointCrosshair()
+                        && GL11.red < 0.3f && GL11.green < 0.3f && GL11.blue == 1.0f,
+                "a target intersecting the camera ray must activate PZ3D-style target feedback");
         IsoCamera.character = originalCamera;
         ThirdPerson.active = true;
 
