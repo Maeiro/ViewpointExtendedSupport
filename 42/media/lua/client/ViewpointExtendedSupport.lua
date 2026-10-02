@@ -17,6 +17,9 @@ if PZAPI and PZAPI.ModOptions then
     options.ergonomicUi = modOptions:addTickBox("ErgonomicUIIntegration", "Integrate with Ergonomic UI", true)
     options.vehicleCamera = modOptions:addTickBox("ThirdPersonInVehicles", "Use third person in vehicles", true)
     options.thirdPersonScrollZoom = modOptions:addTickBox("ThirdPersonScrollZoom", "Zoom third-person camera with mouse wheel", true)
+    options.thirdPersonZoomOutKey = modOptions:addKeyBind("ThirdPersonZoomOutKey", "Zoom third-person camera out", keyOrFallback("KEY_MINUS", 12))
+    options.thirdPersonZoomInKey = modOptions:addKeyBind("ThirdPersonZoomInKey", "Zoom third-person camera in", keyOrFallback("KEY_EQUALS", 13))
+    options.groupContextMenuActions = modOptions:addTickBox("GroupContextMenuActions", "Use cascading Viewpoint interaction menus", true)
     options.skipSetup = modOptions:addTickBox("SkipSetupWizard", "Skip Viewpoint startup setup screen", true)
     options.startViewpoint = modOptions:addTickBox("StartViewpointOnGameStart", "Start Viewpoint automatically when entering a game", true)
     options.cursorDiagnostics = modOptions:addTickBox("CursorDiagnostics", "Log cursor and reticle diagnostics", true)
@@ -41,7 +44,10 @@ local function syncConfiguration()
         optionValue(options.viewModeKey, 0),
         optionValue(options.cursorDiagnostics, true),
         optionValue(options.thirdPersonScrollZoom, true),
-        optionValue(options.skipSetup, true)
+        optionValue(options.skipSetup, true),
+        optionValue(options.thirdPersonZoomOutKey, 12),
+        optionValue(options.thirdPersonZoomInKey, 13),
+        optionValue(options.groupContextMenuActions, true)
     )
 end
 
@@ -188,6 +194,190 @@ end
 Events.OnEnterVehicle.Add(onEnterVehicle)
 Events.OnExitVehicle.Add(onExitVehicle)
 
+local contextMenuIconsHooked = false
+local contextMenuIconsInitialized = false
+local activeContextMenuIconPackName
+local activeContextMenuIconPack
+
+local function registerContextMenuIcons(optionsTable, packName, pack)
+    for localizationKey, details in pairs(optionsTable or {}) do
+        local textureName = type(details) == "string" and details or nil
+        if type(details) == "table" then
+            textureName = details.iconTextureName
+        end
+
+        if textureName and type(localizationKey) == "string" then
+            local folder = pack.settings and pack.settings.textureFolderName or packName
+            local texturePath = "media/ui/cmi/" .. folder .. "/" .. textureName
+            local cmi = ContextMenuIcons
+            if cmi.IconHandler and cmi.IconHandler.getIconPath then
+                local ok, path = pcall(cmi.IconHandler.getIconPath, packName, textureName)
+                if ok and path then texturePath = path end
+            end
+
+            local ok, texture = pcall(getTexture, texturePath)
+            if ok and texture then
+                Support.setContextMenuIcon(getText(localizationKey), texture)
+                Support.setContextMenuIcon(localizationKey, texture)
+            end
+        end
+
+        if type(details) == "table" and details.subOptions then
+            registerContextMenuIcons(details.subOptions, packName, pack)
+        end
+    end
+end
+
+local function refreshContextMenuIcons()
+    if not Support or not Support.clearContextMenuIcons then return end
+    Support.clearContextMenuIcons()
+
+    local cmi = ContextMenuIcons
+    local preferences = cmi and cmi.preferences
+    local packName = preferences and preferences.iconPackName
+    local pack = packName and cmi.iconPacks and cmi.iconPacks[packName]
+    if pack and not cmi.isNoneIconPackSelected then
+        local options = pack.options and pack.options.world
+        registerContextMenuIcons(options, packName, pack)
+    end
+
+    if Support.refreshContextMenuIcons then
+        Support.refreshContextMenuIcons()
+    end
+    activeContextMenuIconPackName = packName
+    activeContextMenuIconPack = pack
+    contextMenuIconsInitialized = true
+end
+
+local function installContextMenuIconsIntegration()
+    local cmi = ContextMenuIcons
+    if type(cmi) ~= "table" or not cmi.Events or not cmi.Events.OnPreferencesApplied then return end
+    if not Support or not Support.clearContextMenuIcons then return end
+
+    if not contextMenuIconsHooked then
+        cmi.Events.OnPreferencesApplied(refreshContextMenuIcons)
+        contextMenuIconsHooked = true
+    end
+
+    local preferences = cmi.preferences
+    local packName = preferences and preferences.iconPackName
+    local pack = packName and cmi.iconPacks and cmi.iconPacks[packName]
+    if not contextMenuIconsInitialized
+            or packName ~= activeContextMenuIconPackName
+            or pack ~= activeContextMenuIconPack then
+        refreshContextMenuIcons()
+    end
+end
+
+local function captureVanillaMenuIcons(menu, captured, visited)
+    if not menu or type(menu.options) ~= "table" or visited[menu] then return end
+    visited[menu] = true
+
+    local optionCount = tonumber(menu.numOptions) or (#menu.options + 1)
+    for index = 1, math.min(optionCount - 1, #menu.options) do
+        local option = menu.options[index]
+        if option then
+            local icon = option.iconTexture
+            if not icon and option.itemForTexture then
+                local ok, texture = pcall(function() return option.itemForTexture:getTex() end)
+                if ok then icon = texture end
+            end
+            if icon and type(option.name) == "string" then
+                table.insert(captured, { option = option, icon = icon })
+            end
+            if option.subOption and menu.getSubMenu then
+                local ok, submenu = pcall(function() return menu:getSubMenu(option.subOption) end)
+                if ok then captureVanillaMenuIcons(submenu, captured, visited) end
+            end
+        end
+    end
+end
+
+local function optionMatchesAction(option, action)
+    if not action or action.fn ~= option.onSelect or type(action.args) ~= "table" then return false end
+    local args = { option.target, option.param1, option.param2, option.param3, option.param4,
+        option.param5, option.param6, option.param7, option.param8, option.param9, option.param10 }
+    for index = 1, 11 do
+        if action.args[index] ~= args[index] then return false end
+    end
+    return true
+end
+
+local function publishVanillaMenuIcons(captured)
+    if not Support or not Support.clearVanillaContextMenuIcons
+            or not Support.setVanillaContextMenuIcon then return end
+
+    Support.clearVanillaContextMenuIcons()
+    for _, entry in ipairs(captured) do
+        local option = entry.option
+        if option.subOption then
+            Support.setVanillaContextMenuIcon(option.name, entry.icon)
+        end
+    end
+
+    local actions = ViewpointInteract and ViewpointInteract.actions or {}
+    local matched = {}
+    for _, action in ipairs(actions) do
+        for _, entry in ipairs(captured) do
+            local option = entry.option
+            if not option.subOption and not matched[entry] and optionMatchesAction(option, action) then
+                Support.setVanillaContextMenuIcon(action.name, entry.icon)
+                matched[entry] = true
+                break
+            end
+        end
+    end
+end
+
+local function installViewpointVanillaMenuIconsIntegration()
+    local interactions = ViewpointInteract
+    if type(interactions) ~= "table" or type(interactions.harvest) ~= "function"
+            or type(ISWorldObjectContextMenu) ~= "table"
+            or type(ISWorldObjectContextMenu.createMenu) ~= "function" then return end
+
+    if interactions._extendedSupportVanillaIconHarvest == interactions.harvest then return end
+    local originalHarvest = interactions.harvest
+    local worldMenu = ISWorldObjectContextMenu
+    local wrapper = function(...)
+        local captured = {}
+        local originalCreateMenu = worldMenu.createMenu
+        local interceptCreateMenu = function(...)
+            local menu = originalCreateMenu(...)
+            captureVanillaMenuIcons(menu, captured, {})
+            return menu
+        end
+
+        worldMenu.createMenu = interceptCreateMenu
+        local ok, result = pcall(originalHarvest, ...)
+        if worldMenu.createMenu == interceptCreateMenu then
+            worldMenu.createMenu = originalCreateMenu
+        end
+
+        if ok and result and type(result.labels) == "table" then
+            publishVanillaMenuIcons(captured)
+        elseif Support and Support.clearVanillaContextMenuIcons then
+            Support.clearVanillaContextMenuIcons()
+        end
+        if not ok then error(result, 0) end
+        return result
+    end
+    interactions.harvest = wrapper
+    interactions._extendedSupportVanillaIconHarvest = wrapper
+
+    if type(interactions.harvestVehicle) == "function"
+            and interactions._extendedSupportVanillaIconVehicle ~= interactions.harvestVehicle then
+        local originalHarvestVehicle = interactions.harvestVehicle
+        local vehicleWrapper = function(...)
+            if Support and Support.clearVanillaContextMenuIcons then
+                Support.clearVanillaContextMenuIcons()
+            end
+            return originalHarvestVehicle(...)
+        end
+        interactions.harvestVehicle = vehicleWrapper
+        interactions._extendedSupportVanillaIconVehicle = vehicleWrapper
+    end
+end
+
 local tickCounter = 0
 Events.OnTick.Add(function()
     tickCounter = tickCounter + 1
@@ -200,6 +390,8 @@ Events.OnTick.Add(function()
     if tickCounter % 10 == 0 then
         syncConfiguration()
         installErgonomicUIIntegration()
+        installContextMenuIconsIntegration()
+        installViewpointVanillaMenuIconsIntegration()
     end
     updateCursorRequest()
 end)
@@ -207,6 +399,8 @@ end)
 Events.OnGameStart.Add(function()
     syncConfiguration()
     installErgonomicUIIntegration()
+    installContextMenuIconsIntegration()
+    installViewpointVanillaMenuIconsIntegration()
     if optionValue(options.startViewpoint, true) and Support and Support.enableViewpoint then
         Support.enableViewpoint()
     end

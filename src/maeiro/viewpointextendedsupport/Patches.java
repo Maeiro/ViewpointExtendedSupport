@@ -128,11 +128,59 @@ public final class Patches {
 
     @Patch(className = "viewpoint.input.Look", methodName = "onUpdateMouseCursor", warmUp = true)
     public static class LookMouseCursorUpdate {
+        @Patch.OnEnter
+        public static void enter() {
+            Bridge.prepareMouseCursorUpdate();
+        }
+
         @Patch.OnExit
         public static void exit(@Patch.Return(readOnly = false) boolean result) {
             result = Bridge.overrideLookMouseCursorUpdate(result);
         }
     }
+
+    @Patch(className = "viewpoint.interact.LootRows", methodName = "actions", warmUp = true)
+    public static class ViewpointInteractionGroups {
+        @Patch.OnExit
+        public static void exit(@Patch.This(readOnly = true) Object rows) {
+            Bridge.groupContextMenuActions(rows);
+        }
+    }
+
+    @Patch(className = "viewpoint.interact.InteractActions", methodName = "run", warmUp = true)
+    public static class GroupedInteractionAction {
+        @Patch.OnEnter(skipOn = true)
+        public static boolean enter(@Patch.Argument(1) int action) {
+            return Bridge.handleGroupedContextAction(action);
+        }
+    }
+
+    @Patch(className = "viewpoint.interact.LootRows", methodName = "clear", warmUp = true)
+    public static class ClearGroupedInteractionMenu {
+        @Patch.OnEnter
+        public static void enter(@Patch.This(readOnly = true) Object rows) {
+            Bridge.clearGroupedContextMenu(rows);
+        }
+    }
+
+    @Patch(className = "viewpoint.interact.LootRows", methodName = "build", warmUp = true)
+    public static class RebuildGroupedInteractionMenu {
+        @Patch.OnEnter
+        public static void enter(@Patch.This(readOnly = true) Object rows) {
+            Bridge.clearGroupedContextMenu(rows);
+        }
+    }
+
+    @Patch(className = "viewpoint.interact.LootPanel", methodName = "besides", warmUp = true)
+    public static class ViewpointInteractionIconSpacing {
+        @Patch.OnExit
+        public static void exit(@Patch.Argument(1) Object row,
+                                @Patch.Argument(2) int iconSize,
+                                @Patch.Return(readOnly = false) int spacing) {
+            spacing = Bridge.adjustContextMenuIconSpacing(row, spacing, iconSize);
+        }
+    }
+
 
     @Patch(className = "zombie.input.Mouse", methodName = "renderCursorTexture", warmUp = true)
     public static class DirectMouseCursorTexture {

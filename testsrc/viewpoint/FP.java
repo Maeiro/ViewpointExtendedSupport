@@ -8,6 +8,10 @@ public final class FP {
         resetCount++;
     }
 
+    public static void toggleCursorMode() {
+        cursorMode = !cursorMode;
+    }
+
     public static boolean cursor() {
         return cursorMode;
     }

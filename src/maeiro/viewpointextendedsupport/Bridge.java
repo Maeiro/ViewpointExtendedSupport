@@ -1,7 +1,12 @@
 package maeiro.viewpointextendedsupport;
 
+import java.lang.reflect.Constructor;
 import java.lang.reflect.Field;
 import java.lang.reflect.Method;
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.LinkedHashMap;
+import java.util.Map;
 
 import me.zed_0xff.zombie_buddy.Exposer;
 
@@ -11,9 +16,16 @@ public final class Bridge {
     private static final int INSERT_KEY = 210;
     private static final int LEFT_SHIFT_KEY = 42;
     private static final int RIGHT_SHIFT_KEY = 54;
+    private static final int DEFAULT_ZOOM_OUT_KEY = 12;
+    private static final int DEFAULT_ZOOM_IN_KEY = 13;
+    private static final int GROUP_ACTION_START = 1_000_000_000;
+    private static final int GROUP_BACK_ACTION = Integer.MAX_VALUE;
+    private static final Map<String, Object> interactionIcons = new HashMap<>();
+    private static final Map<String, Object> vanillaInteractionIcons = new HashMap<>();
     private static final int GLFW_CURSOR = 208897;
     private static final int GLFW_CURSOR_NORMAL = 212993;
     private static final int GLFW_CURSOR_HIDDEN = 212994;
+    private static final int GLFW_CURSOR_DISABLED = 212995;
     private static final float THIRD_PERSON_ZOOM_STEP = 0.5f;
     private static final float THIRD_PERSON_ZOOM_MIN = -2.0f;
     private static final float THIRD_PERSON_ZOOM_MAX = 8.0f;
@@ -28,11 +40,15 @@ public final class Bridge {
     private static volatile boolean autoCursorInUi = true;
     private static volatile boolean debugLogging = true;
     private static volatile boolean thirdPersonScrollZoom = true;
+    private static volatile int thirdPersonZoomOutKey = DEFAULT_ZOOM_OUT_KEY;
+    private static volatile int thirdPersonZoomInKey = DEFAULT_ZOOM_IN_KEY;
+    private static volatile boolean groupContextMenuActionsEnabled = true;
     private static volatile boolean skipSetupWizard = true;
     private static volatile float thirdPersonZoomOffset;
     private static volatile int pendingMouseWheel;
     private static volatile boolean autoCursorRequested;
     private static volatile boolean forcedCursor;
+    private static volatile boolean freeCursorOverrideActive;
     private static volatile boolean lootCursorRequested;
     private static volatile boolean systemCursorHidden;
     private static volatile long systemCursorWindow;
@@ -40,6 +56,15 @@ public final class Bridge {
     private static volatile Field viewEnabled;
     private static volatile Field thirdPersonActive;
     private static volatile Field cursorMode;
+    private static volatile Field lookWantCapture;
+    private static volatile Field lootRows;
+    private static volatile Field lootRowName;
+    private static volatile Field lootRowAction;
+    private static volatile Field lootRowIcon;
+    private static volatile Field lootRowEnabled;
+    private static volatile Field lootRowsSelected;
+    private static volatile Constructor<?> lootRowConstructor;
+    private static volatile InteractionMenu activeInteractionMenu;
     private static volatile Field lookYaw;
     private static volatile Field lookPitch;
     private static volatile Method keyPressed;
@@ -73,6 +98,7 @@ public final class Bridge {
     private static volatile boolean diagnosticAutoCursor;
     private static volatile boolean diagnosticThirdPerson;
     private static volatile boolean diagnosticVehicle;
+    private static volatile boolean contextGroupingWarningLogged;
 
     private Bridge() {
     }
@@ -95,6 +121,24 @@ public final class Bridge {
                                  boolean holdCursor, int cursorKey, boolean autoUi,
                                  int modeToggleKey, boolean debug, boolean scrollZoom,
                                  boolean skipWizard) {
+        configure(firstKey, thirdKey, requireShift, holdCursor, cursorKey, autoUi,
+                modeToggleKey, debug, scrollZoom, skipWizard,
+                DEFAULT_ZOOM_OUT_KEY, DEFAULT_ZOOM_IN_KEY);
+    }
+
+    public static void configure(int firstKey, int thirdKey, boolean requireShift,
+                                 boolean holdCursor, int cursorKey, boolean autoUi,
+                                 int modeToggleKey, boolean debug, boolean scrollZoom,
+                                 boolean skipWizard, int zoomOutKey, int zoomInKey) {
+        configure(firstKey, thirdKey, requireShift, holdCursor, cursorKey, autoUi,
+                modeToggleKey, debug, scrollZoom, skipWizard, zoomOutKey, zoomInKey, true);
+    }
+
+    public static void configure(int firstKey, int thirdKey, boolean requireShift,
+                                 boolean holdCursor, int cursorKey, boolean autoUi,
+                                 int modeToggleKey, boolean debug, boolean scrollZoom,
+                                 boolean skipWizard, int zoomOutKey, int zoomInKey,
+                                 boolean groupActions) {
         firstPersonKey = Math.max(0, firstKey);
         thirdPersonKey = Math.max(0, thirdKey);
         viewModeToggleKey = Math.max(0, modeToggleKey);
@@ -105,6 +149,80 @@ public final class Bridge {
         debugLogging = debug;
         thirdPersonScrollZoom = scrollZoom;
         skipSetupWizard = skipWizard;
+        thirdPersonZoomOutKey = Math.max(0, zoomOutKey);
+        thirdPersonZoomInKey = Math.max(0, zoomInKey);
+        if (groupContextMenuActionsEnabled != groupActions) {
+            groupContextMenuActionsEnabled = groupActions;
+            InteractionMenu menu = activeInteractionMenu;
+            if (menu != null) {
+                if (groupActions) {
+                    groupContextMenuActions(menu.rowsObject);
+                } else {
+                    restoreInteractionMenu(menu);
+                    menu.grouped = false;
+                    if (applyInteractionIcons(menu.rootEntries, menu.iconField, null)) {
+                        activeInteractionMenu = menu;
+                    } else {
+                        activeInteractionMenu = null;
+                    }
+                }
+            }
+        }
+    }
+
+    public static synchronized void clearContextMenuIcons() {
+        interactionIcons.clear();
+    }
+
+    public static synchronized void clearVanillaContextMenuIcons() {
+        vanillaInteractionIcons.clear();
+    }
+
+    public static synchronized void setContextMenuIcon(String label, Object texture) {
+        if (label != null && texture != null) {
+            interactionIcons.put(label, texture);
+        }
+    }
+
+    public static synchronized void setVanillaContextMenuIcon(String label, Object texture) {
+        if (label != null && texture != null) {
+            vanillaInteractionIcons.put(label, texture);
+        }
+    }
+
+    public static void refreshContextMenuIcons() {
+        InteractionMenu menu = activeInteractionMenu;
+        if (menu == null) {
+            return;
+        }
+        applyInteractionIcons(menu.rootEntries, menu.iconField, null);
+        if (menu.grouped) {
+            updateVisibleGroupIcons(menu);
+        }
+    }
+
+    public static int adjustContextMenuIconSpacing(Object row, int spacing, int iconSize) {
+        if (row == null) {
+            return spacing;
+        }
+        try {
+            Field iconField = lootRowIcon;
+            if (iconField == null) {
+                iconField = field(row.getClass().getName(), "icon");
+                lootRowIcon = iconField;
+            }
+            Field actionField = lootRowAction;
+            if (actionField == null) {
+                actionField = field(row.getClass().getName(), "action");
+                lootRowAction = actionField;
+            }
+            if (iconField != null && actionField != null
+                    && iconField.get(row) != null && actionField.getInt(row) >= 0) {
+                return Math.max(spacing, iconSize + 8);
+            }
+        } catch (Throwable ignored) {
+        }
+        return spacing;
     }
 
     public static boolean shouldSkipSetupWizard() {
@@ -158,15 +276,25 @@ public final class Bridge {
     public static void pollThirdPersonZoom() {
         int wheel = pendingMouseWheel;
         pendingMouseWheel = 0;
-        if (wheel == 0) {
+        if (!isViewEnabled() || !isThirdPerson() || isFreeCursor()) {
             return;
         }
-        if (!thirdPersonScrollZoom || !isViewEnabled() || !isThirdPerson() || isFreeCursor()) {
+
+        int steps = thirdPersonScrollZoom ? -wheel : 0;
+        if (thirdPersonZoomOutKey > 0 && isPressed(thirdPersonZoomOutKey)) {
+            eat(thirdPersonZoomOutKey);
+            steps++;
+        }
+        if (thirdPersonZoomInKey > 0 && isPressed(thirdPersonZoomInKey)) {
+            eat(thirdPersonZoomInKey);
+            steps--;
+        }
+        if (steps == 0) {
             return;
         }
 
         float previous = thirdPersonZoomOffset;
-        float next = clamp(previous - (wheel * THIRD_PERSON_ZOOM_STEP),
+        float next = clamp(previous + (steps * THIRD_PERSON_ZOOM_STEP),
                 THIRD_PERSON_ZOOM_MIN, THIRD_PERSON_ZOOM_MAX);
         thirdPersonZoomOffset = next;
         if (debugLogging && previous != next) {
@@ -186,10 +314,451 @@ public final class Bridge {
     }
 
     public static float adjustThirdPersonBoom(float original) {
-        if (!thirdPersonScrollZoom || !isViewEnabled() || !isThirdPerson()) {
+        if (!isViewEnabled() || !isThirdPerson()) {
             return original;
         }
         return Math.max(THIRD_PERSON_BOOM_MIN, original + thirdPersonZoomOffset);
+    }
+
+    @SuppressWarnings("unchecked")
+    public static void groupContextMenuActions(Object rowsObject) {
+        if (rowsObject == null) {
+            return;
+        }
+
+        InteractionMenu menu = null;
+        try {
+            InteractionMenu previous = activeInteractionMenu;
+            if (previous != null) {
+                restoreInteractionMenu(previous);
+                activeInteractionMenu = null;
+            }
+
+            Field rowsField = lootRows;
+            if (rowsField == null) {
+                rowsField = field("viewpoint.interact.LootRows", "rows");
+                lootRows = rowsField;
+            }
+            if (rowsField == null) {
+                return;
+            }
+
+            Object rowsValue = rowsField.get(rowsObject);
+            if (!(rowsValue instanceof ArrayList<?>)) {
+                return;
+            }
+            ArrayList<Object> rows = (ArrayList<Object>) rowsValue;
+
+            Class<?> rowClass = Class.forName("viewpoint.interact.LootRows$Row");
+            Field nameField = lootRowName;
+            Field actionField = lootRowAction;
+            Field iconField = lootRowIcon;
+            Field enabledField = lootRowEnabled;
+            Field selectedField = lootRowsSelected;
+            Constructor<?> rowFactory = lootRowConstructor;
+            if (nameField == null) {
+                nameField = field(rowClass.getName(), "name");
+                lootRowName = nameField;
+            }
+            if (actionField == null) {
+                actionField = field(rowClass.getName(), "action");
+                lootRowAction = actionField;
+            }
+            if (iconField == null) {
+                iconField = field(rowClass.getName(), "icon");
+                lootRowIcon = iconField;
+            }
+            if (enabledField == null) {
+                enabledField = field(rowClass.getName(), "enabled");
+                lootRowEnabled = enabledField;
+            }
+            if (selectedField == null) {
+                selectedField = field("viewpoint.interact.LootRows", "selected");
+                lootRowsSelected = selectedField;
+            }
+            if (rowFactory == null) {
+                rowFactory = rowClass.getDeclaredConstructor();
+                rowFactory.setAccessible(true);
+                lootRowConstructor = rowFactory;
+            }
+            if (nameField == null || actionField == null || iconField == null
+                    || enabledField == null || selectedField == null) {
+                return;
+            }
+
+            int firstAction = rows.size();
+            while (firstAction > 0 && actionField.getInt(rows.get(firstAction - 1)) >= 0) {
+                firstAction--;
+            }
+            if (firstAction == rows.size()) {
+                return;
+            }
+
+            menu = new InteractionMenu(rowsObject, rows, selectedField,
+                    nameField, actionField, enabledField, rowFactory);
+            menu.prefixRows.addAll(rows.subList(0, firstAction));
+            for (int index = firstAction; index < rows.size(); index++) {
+                Object row = rows.get(index);
+                String name = (String) nameField.get(row);
+                menu.actionRows.add(row);
+                addInteractionAction(menu, row, name);
+            }
+
+            menu.iconField = iconField;
+            menu.grouped = groupContextMenuActionsEnabled && containsGroup(menu.rootEntries);
+            if (menu.grouped) {
+                assignGroupActions(menu, menu.rootEntries);
+                setLeafLabels(menu.rootEntries, nameField);
+            }
+
+            boolean hasIcons = applyInteractionIcons(menu.rootEntries, iconField, null);
+            if (!menu.grouped && !hasIcons) {
+                return;
+            }
+
+            activeInteractionMenu = menu;
+            if (menu.grouped) {
+                showInteractionLevel(menu, true);
+            }
+        } catch (Throwable failure) {
+            if (menu != null) {
+                restoreInteractionMenu(menu);
+                if (activeInteractionMenu == menu) {
+                    activeInteractionMenu = null;
+                }
+            }
+            logContextGroupingFailure(failure);
+        }
+    }
+
+    public static boolean handleGroupedContextAction(int action) {
+        InteractionMenu menu = activeInteractionMenu;
+        if (!groupContextMenuActionsEnabled || menu == null) {
+            return false;
+        }
+
+        try {
+            if (action == GROUP_BACK_ACTION) {
+                if (menu.path.isEmpty()) {
+                    return false;
+                }
+                menu.path.remove(menu.path.size() - 1);
+                int previousSelection = menu.parentSelections.remove(menu.parentSelections.size() - 1);
+                showInteractionLevel(menu, false);
+                menu.selectedField.setInt(menu.rowsObject, previousSelection);
+                return true;
+            }
+
+            InteractionEntry group = menu.groupsByAction.get(action);
+            if (group == null) {
+                return false;
+            }
+            menu.parentSelections.add(menu.selectedField.getInt(menu.rowsObject));
+            menu.path.add(group);
+            showInteractionLevel(menu, true);
+            return true;
+        } catch (Throwable failure) {
+            logContextGroupingFailure(failure);
+            return true;
+        }
+    }
+
+    public static void clearGroupedContextMenu(Object rowsObject) {
+        InteractionMenu menu = activeInteractionMenu;
+        if (menu == null || menu.rowsObject != rowsObject) {
+            return;
+        }
+        restoreInteractionMenu(menu);
+        activeInteractionMenu = null;
+    }
+
+    private static void addInteractionAction(InteractionMenu menu, Object row, String label) {
+        String[] parts = label == null ? new String[0] : label.split(": ");
+        if (parts.length < 2) {
+            menu.rootEntries.add(InteractionEntry.action(label, row, label));
+            return;
+        }
+
+        ArrayList<InteractionEntry> entries = menu.rootEntries;
+        for (int index = 0; index < parts.length - 1; index++) {
+            InteractionEntry group = findOrCreateGroup(entries, parts[index]);
+            entries = group.children;
+        }
+        String actionName = parts[parts.length - 1];
+        entries.add(InteractionEntry.action(actionName, row, label));
+    }
+
+    private static InteractionEntry findOrCreateGroup(ArrayList<InteractionEntry> entries, String name) {
+        for (InteractionEntry entry : entries) {
+            if (entry.group && entry.name.equals(name)) {
+                return entry;
+            }
+        }
+        InteractionEntry group = InteractionEntry.group(name);
+        entries.add(group);
+        return group;
+    }
+
+    private static boolean containsGroup(ArrayList<InteractionEntry> entries) {
+        for (InteractionEntry entry : entries) {
+            if (entry.group) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static void assignGroupActions(InteractionMenu menu, ArrayList<InteractionEntry> entries) {
+        for (InteractionEntry entry : entries) {
+            if (entry.group) {
+                entry.action = GROUP_ACTION_START + menu.groupsByAction.size();
+                menu.groupsByAction.put(entry.action, entry);
+                assignGroupActions(menu, entry.children);
+            }
+        }
+    }
+
+    private static void showInteractionLevel(InteractionMenu menu, boolean selectFirst) throws Exception {
+        menu.rows.clear();
+        menu.rows.addAll(menu.prefixRows);
+        ArrayList<InteractionEntry> visibleEntries = menu.path.isEmpty()
+                ? menu.rootEntries : menu.path.get(menu.path.size() - 1).children;
+
+        int firstSelectable = -1;
+        int backIndex = -1;
+        if (!menu.path.isEmpty()) {
+            backIndex = menu.rows.size();
+            menu.rows.add(createInteractionRow(menu, "< Back", GROUP_BACK_ACTION, null));
+        }
+        for (InteractionEntry entry : visibleEntries) {
+            Object row = entry.group
+                    ? createInteractionRow(menu, entry.name + "  >", entry.action, entry.icon)
+                    : entry.actionRow;
+            menu.rows.add(row);
+            if (firstSelectable < 0 && isInteractionRowSelectable(menu, row)) {
+                firstSelectable = menu.rows.size() - 1;
+            }
+        }
+        if (selectFirst) {
+            if (firstSelectable < 0) {
+                firstSelectable = backIndex;
+            }
+            if (firstSelectable >= 0) {
+                menu.selectedField.setInt(menu.rowsObject, firstSelectable);
+            }
+        }
+    }
+
+    private static boolean isInteractionRowSelectable(InteractionMenu menu, Object row) throws IllegalAccessException {
+        return menu.actionField.getInt(row) >= 0 && menu.enabledField.getBoolean(row);
+    }
+
+    private static Object createInteractionRow(InteractionMenu menu, String name, int action, Object icon) throws Exception {
+        Object row = menu.rowFactory.newInstance();
+        menu.nameField.set(row, name);
+        menu.actionField.setInt(row, action);
+        menu.iconField.set(row, icon);
+        menu.enabledField.setBoolean(row, true);
+        return row;
+    }
+
+    private static void restoreInteractionMenu(InteractionMenu menu) {
+        try {
+            restoreActionNames(menu.rootEntries, menu.nameField);
+            restoreActionIcons(menu.rootEntries, menu.iconField);
+            menu.rows.clear();
+            menu.rows.addAll(menu.prefixRows);
+            menu.rows.addAll(menu.actionRows);
+            menu.path.clear();
+            menu.parentSelections.clear();
+            if (!menu.rows.isEmpty()) {
+                int selected = Math.max(0, Math.min(menu.selectedField.getInt(menu.rowsObject), menu.rows.size() - 1));
+                menu.selectedField.setInt(menu.rowsObject, selected);
+            }
+        } catch (Throwable failure) {
+            logContextGroupingFailure(failure);
+        }
+    }
+
+    private static void restoreActionNames(ArrayList<InteractionEntry> entries, Field nameField) throws IllegalAccessException {
+        for (InteractionEntry entry : entries) {
+            if (entry.group) {
+                restoreActionNames(entry.children, nameField);
+            } else {
+                nameField.set(entry.actionRow, entry.originalName);
+            }
+        }
+    }
+
+    private static void setLeafLabels(ArrayList<InteractionEntry> entries, Field nameField) throws IllegalAccessException {
+        for (InteractionEntry entry : entries) {
+            if (entry.group) {
+                setLeafLabels(entry.children, nameField);
+            } else if (entry.name == null ? entry.originalName != null : !entry.name.equals(entry.originalName)) {
+                nameField.set(entry.actionRow, entry.name);
+            }
+        }
+    }
+
+    private static boolean applyInteractionIcons(ArrayList<InteractionEntry> entries, Field iconField,
+                                                 Object parentIcon) {
+        boolean found = false;
+        try {
+            for (InteractionEntry entry : entries) {
+                if (entry.group) {
+                    entry.icon = vanillaContextMenuIcon(entry.name);
+                    if (entry.icon == null) {
+                        entry.icon = contextMenuIcon(entry.name);
+                    }
+                    if (entry.icon == null) {
+                        entry.icon = parentIcon;
+                    }
+                    if (entry.icon != null) {
+                        found = true;
+                    }
+                    found |= applyInteractionIcons(entry.children, iconField, entry.icon);
+                    continue;
+                }
+
+                if (!entry.originalIconCaptured) {
+                    entry.originalIcon = iconField.get(entry.actionRow);
+                    entry.originalIconCaptured = true;
+                }
+                Object icon = vanillaContextMenuIcon(entry.originalName);
+                if (icon == null) {
+                    icon = vanillaContextMenuIcon(entry.name);
+                }
+                if (icon == null) {
+                    icon = contextMenuIcon(entry.originalName);
+                }
+                if (icon == null) {
+                    icon = contextMenuIcon(entry.name);
+                }
+                if (icon == null) {
+                    icon = parentIcon;
+                }
+                if (icon != null && iconField.getType().isInstance(icon)) {
+                    iconField.set(entry.actionRow, icon);
+                    found = true;
+                } else {
+                    iconField.set(entry.actionRow, entry.originalIcon);
+                }
+            }
+        } catch (Throwable failure) {
+            logContextGroupingFailure(failure);
+        }
+        return found;
+    }
+
+    private static void restoreActionIcons(ArrayList<InteractionEntry> entries, Field iconField) throws IllegalAccessException {
+        for (InteractionEntry entry : entries) {
+            if (entry.group) {
+                restoreActionIcons(entry.children, iconField);
+            } else if (entry.originalIconCaptured) {
+                iconField.set(entry.actionRow, entry.originalIcon);
+            }
+        }
+    }
+
+    private static void updateVisibleGroupIcons(InteractionMenu menu) {
+        try {
+            for (Object row : menu.rows) {
+                int action = menu.actionField.getInt(row);
+                if (action == GROUP_BACK_ACTION) {
+                    menu.iconField.set(row, null);
+                    continue;
+                }
+                InteractionEntry group = menu.groupsByAction.get(action);
+                if (group != null) {
+                    menu.iconField.set(row, group.icon);
+                }
+            }
+        } catch (Throwable failure) {
+            logContextGroupingFailure(failure);
+        }
+    }
+
+    private static Object contextMenuIcon(String label) {
+        if (label == null) {
+            return null;
+        }
+        synchronized (interactionIcons) {
+            return interactionIcons.get(label);
+        }
+    }
+
+    private static Object vanillaContextMenuIcon(String label) {
+        if (label == null) {
+            return null;
+        }
+        synchronized (vanillaInteractionIcons) {
+            return vanillaInteractionIcons.get(label);
+        }
+    }
+
+    private static void logContextGroupingFailure(Throwable failure) {
+        if (debugLogging && !contextGroupingWarningLogged) {
+            contextGroupingWarningLogged = true;
+            System.out.println("[Viewpoint Extended Support] could not update interaction menu: "
+                    + failure.getClass().getSimpleName());
+        }
+    }
+
+    private static final class InteractionMenu {
+        private final Object rowsObject;
+        private final ArrayList<Object> rows;
+        private final ArrayList<Object> prefixRows = new ArrayList<>();
+        private final ArrayList<Object> actionRows = new ArrayList<>();
+        private final ArrayList<InteractionEntry> rootEntries = new ArrayList<>();
+        private final LinkedHashMap<Integer, InteractionEntry> groupsByAction = new LinkedHashMap<>();
+        private final ArrayList<InteractionEntry> path = new ArrayList<>();
+        private final ArrayList<Integer> parentSelections = new ArrayList<>();
+        private final Field selectedField;
+        private final Field nameField;
+        private final Field actionField;
+        private Field iconField;
+        private final Field enabledField;
+        private final Constructor<?> rowFactory;
+        private boolean grouped;
+
+        private InteractionMenu(Object rowsObject, ArrayList<Object> rows,
+                                Field selectedField, Field nameField, Field actionField,
+                                Field enabledField, Constructor<?> rowFactory) {
+            this.rowsObject = rowsObject;
+            this.rows = rows;
+            this.selectedField = selectedField;
+            this.nameField = nameField;
+            this.actionField = actionField;
+            this.enabledField = enabledField;
+            this.rowFactory = rowFactory;
+        }
+    }
+
+    private static final class InteractionEntry {
+        private final String name;
+        private final boolean group;
+        private final Object actionRow;
+        private final String originalName;
+        private final ArrayList<InteractionEntry> children = new ArrayList<>();
+        private Object icon;
+        private Object originalIcon;
+        private boolean originalIconCaptured;
+        private int action;
+
+        private InteractionEntry(String name, boolean group, Object actionRow, String originalName) {
+            this.name = name;
+            this.group = group;
+            this.actionRow = actionRow;
+            this.originalName = originalName;
+        }
+
+        private static InteractionEntry group(String name) {
+            return new InteractionEntry(name, true, null, null);
+        }
+
+        private static InteractionEntry action(String name, Object row, String originalName) {
+            return new InteractionEntry(name, false, row, originalName);
+        }
     }
 
     public static boolean isViewEnabled() {
@@ -213,7 +782,13 @@ public final class Bridge {
     }
 
     public static boolean isFreeCursor() {
-        return getBoolean(cursorMode, "viewpoint.FP", "cursorMode");
+        return getBoolean(cursorMode, "viewpoint.FP", "cursorMode") || freeCursorOverrideActive;
+    }
+
+    public static void prepareMouseCursorUpdate() {
+        if (isViewEnabled() && freeCursorOverrideActive) {
+            setBoolean(lookWantCapture, "viewpoint.input.Look", "wantCapture", false);
+        }
     }
 
     public static boolean shouldSkipVanillaCursor(boolean original) {
@@ -284,7 +859,10 @@ public final class Bridge {
         if (!isViewEnabled()) {
             return original;
         }
-        boolean visible = isFreeCursor() && !isThirdPersonVehicle();
+        boolean vehicleCamera = isThirdPersonVehicle();
+        boolean freeCursor = isFreeCursor() && !vehicleCamera;
+        boolean mouseCaptured = readSystemCursorMode() == GLFW_CURSOR_DISABLED;
+        boolean visible = !vehicleCamera && (freeCursor || (!mouseCaptured && original));
         if (debugLogging) {
             if (visible) {
                 mouseCursorVisibleCalls++;
@@ -368,6 +946,7 @@ public final class Bridge {
         if (!holdFreeCursor && !autoCursorInUi) {
             autoCursorRequested = false;
             lootCursorRequested = false;
+            setFreeCursorOverrideActive(false);
             if (forcedCursor) {
                 setCursorMode(false);
                 forcedCursor = false;
@@ -382,10 +961,11 @@ public final class Bridge {
 
         if (holdFreeCursor) {
             boolean held = freeCursorKey > 0 && isDown(freeCursorKey);
-            setCursorMode(held || autoCursorRequested || lootCursor || settingsCursor || paused);
+            setFreeCursorOverrideActive(held || autoCursorRequested || lootCursor || settingsCursor || paused);
             return;
         }
 
+        setFreeCursorOverrideActive(false);
         if (autoCursorRequested) {
             setCursorMode(true);
             forcedCursor = true;
@@ -487,11 +1067,19 @@ public final class Bridge {
     }
 
     private static void setCursorMode(boolean enabled) {
-        boolean previous = isFreeCursor();
+        boolean previous = getBoolean(cursorMode, "viewpoint.FP", "cursorMode");
         setBoolean(cursorMode, "viewpoint.FP", "cursorMode", enabled);
         if (previous != enabled) {
             logDiagnosticState();
         }
+    }
+
+    private static void setFreeCursorOverrideActive(boolean active) {
+        if (freeCursorOverrideActive == active) {
+            return;
+        }
+        freeCursorOverrideActive = active;
+        logDiagnosticState();
     }
 
     private static boolean setSystemCursorMode(int mode) {
@@ -551,7 +1139,7 @@ public final class Bridge {
     private static String systemCursorModeName(int mode) {
         if (mode == GLFW_CURSOR_NORMAL) return "normal";
         if (mode == GLFW_CURSOR_HIDDEN) return "hidden";
-        if (mode == 212995) return "disabled";
+        if (mode == GLFW_CURSOR_DISABLED) return "disabled";
         return Integer.toString(mode);
     }
 
@@ -639,6 +1227,8 @@ public final class Bridge {
                 thirdPersonActive = field;
             } else if (fieldName.equals("cursorMode")) {
                 cursorMode = field;
+            } else if (fieldName.equals("wantCapture") && className.equals("viewpoint.input.Look")) {
+                lookWantCapture = field;
             }
         } catch (Throwable ignored) {
         }
