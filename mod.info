@@ -1,8 +1,8 @@
 name=Viewpoint Extended Support
 id=ViewpointExtendedSupport
 author=Maeiro
-description=Configurable vehicle camera switching, third-person camera zoom, cascading menus, vanilla and Simple Context Menu Icons support, key rebinding, and cursor support for Viewpoint.
-modversion=0.4.21
+description=Configurable vehicle camera switching, third-person camera zoom, deferred cascading interaction menus, vanilla and Simple Context Menu Icons support, key rebinding, and cursor support for Viewpoint.
+modversion=0.4.23
 versionMin=42.20
 require=\ZombieBuddy,\Viewpoint
 ZBVersionMin=2.3.0

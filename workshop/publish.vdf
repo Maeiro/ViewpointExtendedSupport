@@ -1,0 +1,11 @@
+"workshopitem"
+{
+	"appid"		"108600"
+	"publishedfileid"		"3812978679"
+	"contentfolder"		"D:\\SteamCMD\\workshop\\ViewpointExtendedSupport\\content"
+	"previewfile"		"D:\\SteamCMD\\workshop\\ViewpointExtendedSupport\\preview.jpg"
+	"visibility"		"0"
+	"title"		"Viewpoint Extended Support"
+	"description"		"[h1]Viewpoint Extended Support[/h1] Quality-of-life and compatibility features for Project Viewpoint in Project Zomboid Build 42.20+. [h2]Features[/h2][list][*]Automatically switch to third person when entering vehicles and return to first person after exiting.[*]Toggle first/third person with a configurable bind (default: Shift+Z); binds support Shift, Ctrl, Alt, and combinations.[*]Hold Mouse Button 4 for free mouse control, with optional automatic cursor support for inventories and menus, including Ergonomic UI.[*]Hide the Viewpoint interaction menu while the vanilla or Ergonomic UI inventory is open (enabled by default and configurable).[*]Adjust third-person camera distance using the mouse wheel or configurable keys (default: minus and equals).[*]Optional cascading interaction menus with deferred [i]View options[/i] loading.[*]Preserves vanilla interaction icons and optionally integrates with Simple Context Menu Icons.[*]Optionally enter Viewpoint automatically when starting a game and skip the startup setup screen.[/list][h2]Requirements[/h2][list][*]Project Viewpoint[*]ZombieBuddy 2.3.0 or newer[*]Project Zomboid Build 42.20+[/list][h2]Configuration[/h2] Customize features and key binds in the in-game Mod Options. Firearm aiming and weapon behavior remain handled by Project Viewpoint."
+	"changenote"		"Add deferred interaction menus, compound binds, and Companion Dogs nameplate compatibility."
+}

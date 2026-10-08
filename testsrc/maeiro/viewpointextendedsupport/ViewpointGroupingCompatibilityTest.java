@@ -47,16 +47,21 @@ public final class ViewpointGroupingCompatibilityTest {
         rows.add(action(rowConstructor, nameField, actionField, "Drink", 0));
         rows.add(action(rowConstructor, nameField, actionField, "Wash: Yourself", 1));
         rows.add(action(rowConstructor, nameField, actionField, "Wash: All Clothing", 2));
-        rows.add(action(rowConstructor, nameField, actionField, "Wash: Clothing: Socks", 3));
+        Object socksAction = action(rowConstructor, nameField, actionField, "Wash: Clothing: Socks", 3);
+        rows.add(socksAction);
 
         Bridge.groupContextMenuActions(rowsObject);
 
         check(rows.size() == 3, "Viewpoint root menu must contain a category entry");
+        check("Wash: Clothing: Socks".equals(nameField.get(socksAction)),
+                "actions in unopened submenus must not be rewritten eagerly");
         check("Wash  >".equals(nameField.get(rows.get(2))), "nested actions should become an activatable category");
         int washGroup = actionField.getInt(rows.get(2));
         selectedField.setInt(rowsObject, 2);
         check(Bridge.handleGroupedContextAction(washGroup), "category selection should enter the nested menu");
         check(rows.size() == 5, "nested menu should contain Back, actions, and a child category");
+        check("Wash: Clothing: Socks".equals(nameField.get(socksAction)),
+                "deeper submenu actions must remain untouched until their own category is opened");
         check("< Back".equals(nameField.get(rows.get(1))), "nested menu should provide a Back row");
         check("Yourself".equals(nameField.get(rows.get(2))), "child action label should omit the repeated prefix");
         check(actionField.getInt(rows.get(2)) == 1, "child action index must remain unchanged");
@@ -64,10 +69,15 @@ public final class ViewpointGroupingCompatibilityTest {
         selectedField.setInt(rowsObject, 4);
         check(Bridge.handleGroupedContextAction(actionField.getInt(rows.get(4))), "child category should open a deeper level");
         check(rows.size() == 3 && "Socks".equals(nameField.get(rows.get(2))), "deeper submenu should show its leaf action");
+        check("Socks".equals(nameField.get(socksAction)), "opening a submenu should shorten only its visible leaf labels");
         check(Bridge.handleGroupedContextAction(actionField.getInt(rows.get(1))), "Back should return one submenu level");
         check(selectedField.getInt(rowsObject) == 4, "Back should restore the selected child category");
         check(Bridge.handleGroupedContextAction(actionField.getInt(rows.get(1))), "Back should return to the root menu");
         check(rows.size() == 3 && selectedField.getInt(rowsObject) == 2, "Back should restore the root list and its selection");
+        check(Bridge.handleGroupedContextAction(actionField.getInt(rows.get(2))),
+                "a previously opened submenu should be reusable");
+        check(rows.size() == 5 && "Clothing  >".equals(nameField.get(rows.get(4))),
+                "reopening a submenu must not duplicate or lose its children");
         Bridge.clearGroupedContextMenu(rowsObject);
         check(rows.size() == 5, "clearing Viewpoint rows must restore the unmodified list");
         check("Wash: Yourself".equals(nameField.get(rows.get(2))), "restored menu must retain original labels");

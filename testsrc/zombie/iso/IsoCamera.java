@@ -7,6 +7,14 @@ public final class IsoCamera {
         return character;
     }
 
+    public static int getScreenWidth(int playerNum) {
+        return 1920;
+    }
+
+    public static int getScreenHeight(int playerNum) {
+        return 1080;
+    }
+
     public static final class Character {
         public Object vehicle;
 

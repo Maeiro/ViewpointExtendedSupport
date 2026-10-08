@@ -32,9 +32,13 @@ public final class Patches {
 
     @Patch(className = "viewpoint.interact.LootMenu", methodName = "wheel", warmUp = true)
     public static class LootWheel {
-        @Patch.OnEnter
-        public static void enter() {
+        @Patch.OnEnter(skipOn = true)
+        public static boolean enter() {
+            if (Bridge.shouldSkipInteractionWheel()) {
+                return true;
+            }
             Bridge.captureMouseWheel();
+            return false;
         }
     }
 
@@ -178,6 +182,14 @@ public final class Patches {
                                 @Patch.Argument(2) int iconSize,
                                 @Patch.Return(readOnly = false) int spacing) {
             spacing = Bridge.adjustContextMenuIconSpacing(row, spacing, iconSize);
+        }
+    }
+
+    @Patch(className = "viewpoint.interact.LootPanel", methodName = "draw", warmUp = true)
+    public static class ViewpointInteractionMenuVisibility {
+        @Patch.OnEnter(skipOn = true)
+        public static boolean enter() {
+            return Bridge.shouldSkipInteractionMenu();
         }
     }
 

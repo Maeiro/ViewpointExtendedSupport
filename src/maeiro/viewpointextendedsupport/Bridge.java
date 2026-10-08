@@ -1,5 +1,6 @@
 package maeiro.viewpointextendedsupport;
 
+import java.lang.reflect.Array;
 import java.lang.reflect.Constructor;
 import java.lang.reflect.Field;
 import java.lang.reflect.Method;
@@ -10,18 +11,26 @@ import java.util.Map;
 
 import me.zed_0xff.zombie_buddy.Exposer;
 
-@Exposer.LuaClass(name = "ViewpointExtendedSupport")
 public final class Bridge {
     private static final int VIEWPOINT_TOGGLE_KEY = 24;
     private static final int INSERT_KEY = 210;
     private static final int LEFT_SHIFT_KEY = 42;
     private static final int RIGHT_SHIFT_KEY = 54;
+    private static final int LEFT_CONTROL_KEY = 29;
+    private static final int RIGHT_CONTROL_KEY = 157;
+    private static final int LEFT_ALT_KEY = 56;
+    private static final int RIGHT_ALT_KEY = 184;
+    private static final int MODIFIER_SHIFT = 1;
+    private static final int MODIFIER_CONTROL = 2;
+    private static final int MODIFIER_ALT = 4;
     private static final int DEFAULT_ZOOM_OUT_KEY = 12;
     private static final int DEFAULT_ZOOM_IN_KEY = 13;
     private static final int GROUP_ACTION_START = 1_000_000_000;
     private static final int GROUP_BACK_ACTION = Integer.MAX_VALUE;
     private static final Map<String, Object> interactionIcons = new HashMap<>();
     private static final Map<String, Object> vanillaInteractionIcons = new HashMap<>();
+    private static final ArrayList<Float> companionDogTagPosition = new ArrayList<>(2);
+    private static final float[] companionDogTagPixel = new float[2];
     private static final int GLFW_CURSOR = 208897;
     private static final int GLFW_CURSOR_NORMAL = 212993;
     private static final int GLFW_CURSOR_HIDDEN = 212994;
@@ -37,16 +46,22 @@ public final class Bridge {
     private static volatile boolean thirdPersonRequiresShift = true;
     private static volatile boolean holdFreeCursor;
     private static volatile int freeCursorKey;
+    private static volatile int freeCursorModifiers;
     private static volatile boolean autoCursorInUi = true;
     private static volatile boolean debugLogging = true;
     private static volatile boolean thirdPersonScrollZoom = true;
     private static volatile int thirdPersonZoomOutKey = DEFAULT_ZOOM_OUT_KEY;
     private static volatile int thirdPersonZoomInKey = DEFAULT_ZOOM_IN_KEY;
+    private static volatile int viewModeModifiers;
+    private static volatile int thirdPersonZoomOutModifiers;
+    private static volatile int thirdPersonZoomInModifiers;
     private static volatile boolean groupContextMenuActionsEnabled = true;
     private static volatile boolean skipSetupWizard = true;
     private static volatile float thirdPersonZoomOffset;
     private static volatile int pendingMouseWheel;
     private static volatile boolean autoCursorRequested;
+    private static volatile boolean inventoryOpen;
+    private static volatile boolean interactionMenuSuppressed;
     private static volatile boolean forcedCursor;
     private static volatile boolean freeCursorOverrideActive;
     private static volatile boolean lootCursorRequested;
@@ -64,6 +79,8 @@ public final class Bridge {
     private static volatile Field lootRowEnabled;
     private static volatile Field lootRowsSelected;
     private static volatile Constructor<?> lootRowConstructor;
+    private static volatile Field interactionActionsGathered;
+    private static volatile Field interactionActionsAimedAt;
     private static volatile InteractionMenu activeInteractionMenu;
     private static volatile Field lookYaw;
     private static volatile Field lookPitch;
@@ -78,6 +95,16 @@ public final class Bridge {
     private static volatile Method getDisplayWindow;
     private static volatile Method glfwSetInputMode;
     private static volatile Method glfwGetInputMode;
+    private static volatile Field viewpointFrames;
+    private static volatile Field freeCameraActive;
+    private static volatile Field freeCameraPlace;
+    private static volatile Field headTextHeight;
+    private static volatile Constructor<?> worldToScreenConstructor;
+    private static volatile Method worldToScreenSet;
+    private static volatile Method worldToScreenPixel;
+    private static volatile Method screenWidth;
+    private static volatile Method screenHeight;
+    private static volatile Object worldToScreen;
 
     private static volatile long vanillaCursorHookCalls;
     private static volatile long viewpointCursorHookCalls;
@@ -99,6 +126,10 @@ public final class Bridge {
     private static volatile boolean diagnosticThirdPerson;
     private static volatile boolean diagnosticVehicle;
     private static volatile boolean contextGroupingWarningLogged;
+
+    static {
+        Exposer.exposeClass(Bridge.class, "ViewpointExtendedSupport");
+    }
 
     private Bridge() {
     }
@@ -139,18 +170,32 @@ public final class Bridge {
                                  int modeToggleKey, boolean debug, boolean scrollZoom,
                                  boolean skipWizard, int zoomOutKey, int zoomInKey,
                                  boolean groupActions) {
+        configure(firstKey, thirdKey, requireShift, holdCursor, cursorKey, autoUi,
+                modeToggleKey, debug, scrollZoom, skipWizard, zoomOutKey, zoomInKey,
+                groupActions, 0);
+    }
+
+    public static void configure(int firstKey, int thirdKey, boolean requireShift,
+                                 boolean holdCursor, int cursorKey, boolean autoUi,
+                                 int modeToggleKey, boolean debug, boolean scrollZoom,
+                                 boolean skipWizard, int zoomOutKey, int zoomInKey,
+                                 boolean groupActions, int packedModifiers) {
         firstPersonKey = Math.max(0, firstKey);
         thirdPersonKey = Math.max(0, thirdKey);
         viewModeToggleKey = Math.max(0, modeToggleKey);
         thirdPersonRequiresShift = requireShift;
         holdFreeCursor = holdCursor;
         freeCursorKey = Math.max(0, cursorKey);
+        freeCursorModifiers = unpackModifiers(packedModifiers, 0);
         autoCursorInUi = autoUi;
         debugLogging = debug;
         thirdPersonScrollZoom = scrollZoom;
         skipSetupWizard = skipWizard;
         thirdPersonZoomOutKey = Math.max(0, zoomOutKey);
         thirdPersonZoomInKey = Math.max(0, zoomInKey);
+        viewModeModifiers = unpackModifiers(packedModifiers, 3);
+        thirdPersonZoomOutModifiers = unpackModifiers(packedModifiers, 6);
+        thirdPersonZoomInModifiers = unpackModifiers(packedModifiers, 9);
         if (groupContextMenuActionsEnabled != groupActions) {
             groupContextMenuActionsEnabled = groupActions;
             InteractionMenu menu = activeInteractionMenu;
@@ -160,7 +205,7 @@ public final class Bridge {
                 } else {
                     restoreInteractionMenu(menu);
                     menu.grouped = false;
-                    if (applyInteractionIcons(menu.rootEntries, menu.iconField, null)) {
+                    if (applyFlatInteractionIcons(menu)) {
                         activeInteractionMenu = menu;
                     } else {
                         activeInteractionMenu = null;
@@ -176,6 +221,29 @@ public final class Bridge {
 
     public static synchronized void clearVanillaContextMenuIcons() {
         vanillaInteractionIcons.clear();
+    }
+
+    public static boolean requestInteractionOptions() {
+        try {
+            Field gathered = interactionActionsGathered;
+            if (gathered == null) {
+                gathered = field("viewpoint.interact.InteractActions", "gathered");
+                interactionActionsGathered = gathered;
+            }
+            Field aimedAt = interactionActionsAimedAt;
+            if (aimedAt == null) {
+                aimedAt = field("viewpoint.interact.InteractActions", "aimedAt");
+                interactionActionsAimedAt = aimedAt;
+            }
+            if (gathered == null || aimedAt == null) {
+                return false;
+            }
+            gathered.setBoolean(null, false);
+            aimedAt.setLong(null, System.nanoTime() - 150_000_000L);
+            return true;
+        } catch (Throwable ignored) {
+            return false;
+        }
     }
 
     public static synchronized void setContextMenuIcon(String label, Object texture) {
@@ -195,9 +263,11 @@ public final class Bridge {
         if (menu == null) {
             return;
         }
-        applyInteractionIcons(menu.rootEntries, menu.iconField, null);
         if (menu.grouped) {
+            applyInteractionIcons(menu.rootEntries, menu.iconField, null, true);
             updateVisibleGroupIcons(menu);
+        } else {
+            applyFlatInteractionIcons(menu);
         }
     }
 
@@ -242,6 +312,124 @@ public final class Bridge {
         }
     }
 
+    public static void setInteractionMenuSuppressed(boolean suppressed) {
+        interactionMenuSuppressed = suppressed;
+    }
+
+    public static void setInventoryOpen(boolean open) {
+        inventoryOpen = open;
+    }
+
+    public static boolean shouldSkipInteractionMenu() {
+        return interactionMenuSuppressed;
+    }
+
+    public static boolean shouldSkipInteractionWheel() {
+        return inventoryOpen;
+    }
+
+    public static ArrayList<Float> projectCompanionDogTag(int playerNum, float x, float y, float z) {
+        companionDogTagPosition.clear();
+        if (!isViewEnabled() || playerNum < 0) {
+            return null;
+        }
+
+        try {
+            Field framesField = viewpointFrames;
+            if (framesField == null) {
+                framesField = field("viewpoint.FP", "frames");
+                viewpointFrames = framesField;
+            }
+            Object frames = framesField == null ? null : framesField.get(null);
+            if (frames == null || !frames.getClass().isArray()
+                    || playerNum >= Array.getLength(frames)) {
+                return null;
+            }
+            Object frame = Array.get(frames, playerNum);
+            if (frame == null) {
+                return null;
+            }
+
+            Field activeField = freeCameraActive;
+            if (activeField == null) {
+                activeField = field("viewpoint.input.FreeCam", "active");
+                freeCameraActive = activeField;
+            }
+            Field placeField = freeCameraPlace;
+            if (placeField == null) {
+                placeField = field("viewpoint.input.FreeCam", "place");
+                freeCameraPlace = placeField;
+            }
+            Object place = activeField != null && activeField.getBoolean(null)
+                    && placeField != null ? placeField.get(null) : null;
+
+            Method widthMethod = screenWidth;
+            if (widthMethod == null) {
+                widthMethod = method("zombie.iso.IsoCamera", "getScreenWidth", int.class);
+                screenWidth = widthMethod;
+            }
+            Method heightMethod = screenHeight;
+            if (heightMethod == null) {
+                heightMethod = method("zombie.iso.IsoCamera", "getScreenHeight", int.class);
+                screenHeight = heightMethod;
+            }
+            if (widthMethod == null || heightMethod == null) {
+                return null;
+            }
+            float width = ((Number) widthMethod.invoke(null, playerNum)).floatValue();
+            float height = ((Number) heightMethod.invoke(null, playerNum)).floatValue();
+
+            Constructor<?> constructor = worldToScreenConstructor;
+            Method setMethod = worldToScreenSet;
+            Method pixelMethod = worldToScreenPixel;
+            if (constructor == null || setMethod == null || pixelMethod == null) {
+                Class<?> frameClass = Class.forName("viewpoint.core.Frame");
+                Class<?> placeClass = Class.forName("viewpoint.input.FreeCam$Place");
+                Class<?> screenClass = Class.forName("viewpoint.game.WorldToScreen");
+                constructor = screenClass.getDeclaredConstructor();
+                constructor.setAccessible(true);
+                setMethod = screenClass.getDeclaredMethod("set", frameClass, placeClass,
+                        float.class, float.class);
+                setMethod.setAccessible(true);
+                pixelMethod = screenClass.getDeclaredMethod("pixel", float.class, float.class,
+                        float.class, float.class, float[].class);
+                pixelMethod.setAccessible(true);
+                worldToScreenConstructor = constructor;
+                worldToScreenSet = setMethod;
+                worldToScreenPixel = pixelMethod;
+            }
+
+            Object projection = worldToScreen;
+            if (projection == null) {
+                projection = constructor.newInstance();
+                worldToScreen = projection;
+            }
+            if (!Boolean.TRUE.equals(setMethod.invoke(projection, frame, place, width, height))) {
+                return null;
+            }
+
+            Field headHeightField = headTextHeight;
+            if (headHeightField == null) {
+                headHeightField = field("viewpoint.platform.Tuning", "headTextHeight");
+                headTextHeight = headHeightField;
+            }
+            if (headHeightField == null) {
+                return null;
+            }
+            float offset = headHeightField.getFloat(null);
+            if (!Boolean.TRUE.equals(pixelMethod.invoke(projection, x, y, z, offset,
+                    companionDogTagPixel))) {
+                return null;
+            }
+
+            companionDogTagPosition.add(companionDogTagPixel[0]);
+            companionDogTagPosition.add(companionDogTagPixel[1]);
+            return companionDogTagPosition;
+        } catch (Throwable ignored) {
+            return null;
+        }
+    }
+
     public static void diagnosticTick() {
         if (!debugLogging) {
             return;
@@ -274,6 +462,10 @@ public final class Bridge {
     }
 
     public static void pollThirdPersonZoom() {
+        if (shouldSkipInteractionWheel()) {
+            pendingMouseWheel = 0;
+            return;
+        }
         int wheel = pendingMouseWheel;
         pendingMouseWheel = 0;
         if (!isViewEnabled() || !isThirdPerson() || isFreeCursor()) {
@@ -281,11 +473,13 @@ public final class Bridge {
         }
 
         int steps = thirdPersonScrollZoom ? -wheel : 0;
-        if (thirdPersonZoomOutKey > 0 && isPressed(thirdPersonZoomOutKey)) {
+        if (thirdPersonZoomOutKey > 0
+                && isPressedWithModifiers(thirdPersonZoomOutKey, thirdPersonZoomOutModifiers)) {
             eat(thirdPersonZoomOutKey);
             steps++;
         }
-        if (thirdPersonZoomInKey > 0 && isPressed(thirdPersonZoomInKey)) {
+        if (thirdPersonZoomInKey > 0
+                && isPressedWithModifiers(thirdPersonZoomInKey, thirdPersonZoomInModifiers)) {
             eat(thirdPersonZoomInKey);
             steps--;
         }
@@ -303,6 +497,10 @@ public final class Bridge {
     }
 
     public static void captureMouseWheel() {
+        if (shouldSkipInteractionWheel()) {
+            pendingMouseWheel = 0;
+            return;
+        }
         int wheel = readMouseWheelState();
         if (wheel == 0) {
             return;
@@ -400,18 +598,20 @@ public final class Bridge {
             for (int index = firstAction; index < rows.size(); index++) {
                 Object row = rows.get(index);
                 String name = (String) nameField.get(row);
-                menu.actionRows.add(row);
-                addInteractionAction(menu, row, name);
+                InteractionAction interactionAction = new InteractionAction(row, name);
+                menu.actionRows.add(interactionAction);
+                addRootInteractionAction(menu, interactionAction);
             }
 
             menu.iconField = iconField;
             menu.grouped = groupContextMenuActionsEnabled && containsGroup(menu.rootEntries);
             if (menu.grouped) {
                 assignGroupActions(menu, menu.rootEntries);
-                setLeafLabels(menu.rootEntries, nameField);
             }
 
-            boolean hasIcons = applyInteractionIcons(menu.rootEntries, iconField, null);
+            boolean hasIcons = menu.grouped
+                    ? applyInteractionIcons(menu.rootEntries, iconField, null, false)
+                    : applyFlatInteractionIcons(menu);
             if (!menu.grouped && !hasIcons) {
                 return;
             }
@@ -472,31 +672,53 @@ public final class Bridge {
         activeInteractionMenu = null;
     }
 
-    private static void addInteractionAction(InteractionMenu menu, Object row, String label) {
-        String[] parts = label == null ? new String[0] : label.split(": ");
-        if (parts.length < 2) {
-            menu.rootEntries.add(InteractionEntry.action(label, row, label));
+    private static void addRootInteractionAction(InteractionMenu menu, InteractionAction action) {
+        String label = action.originalName;
+        int separator = label == null ? -1 : label.indexOf(": ");
+        if (separator < 0) {
+            menu.rootEntries.add(InteractionEntry.action(label, action));
             return;
         }
 
-        ArrayList<InteractionEntry> entries = menu.rootEntries;
-        for (int index = 0; index < parts.length - 1; index++) {
-            InteractionEntry group = findOrCreateGroup(entries, parts[index]);
-            entries = group.children;
-        }
-        String actionName = parts[parts.length - 1];
-        entries.add(InteractionEntry.action(actionName, row, label));
+        String groupName = label.substring(0, separator);
+        findOrCreateGroup(menu.rootEntries, groupName, groupName).candidateActions.add(action);
     }
 
-    private static InteractionEntry findOrCreateGroup(ArrayList<InteractionEntry> entries, String name) {
+    private static InteractionEntry findOrCreateGroup(ArrayList<InteractionEntry> entries,
+                                                      String name, String path) {
         for (InteractionEntry entry : entries) {
-            if (entry.group && entry.name.equals(name)) {
+            if (entry.group && entry.path.equals(path)) {
                 return entry;
             }
         }
-        InteractionEntry group = InteractionEntry.group(name);
+        InteractionEntry group = InteractionEntry.group(name, path);
         entries.add(group);
         return group;
+    }
+
+    private static void populateGroupChildren(InteractionMenu menu, InteractionEntry parent) {
+        if (parent.childrenLoaded) {
+            return;
+        }
+
+        String prefix = parent.path + ": ";
+        for (InteractionAction action : parent.candidateActions) {
+            String label = action.originalName;
+            if (label == null || !label.startsWith(prefix)) {
+                continue;
+            }
+
+            String childLabel = label.substring(prefix.length());
+            int separator = childLabel.indexOf(": ");
+            if (separator < 0) {
+                parent.children.add(InteractionEntry.action(childLabel, action));
+            } else {
+                String childName = childLabel.substring(0, separator);
+                String childPath = prefix + childName;
+                findOrCreateGroup(parent.children, childName, childPath).candidateActions.add(action);
+            }
+        }
+        parent.childrenLoaded = true;
     }
 
     private static boolean containsGroup(ArrayList<InteractionEntry> entries) {
@@ -510,10 +732,9 @@ public final class Bridge {
 
     private static void assignGroupActions(InteractionMenu menu, ArrayList<InteractionEntry> entries) {
         for (InteractionEntry entry : entries) {
-            if (entry.group) {
+            if (entry.group && entry.action == 0) {
                 entry.action = GROUP_ACTION_START + menu.groupsByAction.size();
                 menu.groupsByAction.put(entry.action, entry);
-                assignGroupActions(menu, entry.children);
             }
         }
     }
@@ -523,6 +744,12 @@ public final class Bridge {
         menu.rows.addAll(menu.prefixRows);
         ArrayList<InteractionEntry> visibleEntries = menu.path.isEmpty()
                 ? menu.rootEntries : menu.path.get(menu.path.size() - 1).children;
+        if (!menu.path.isEmpty()) {
+            InteractionEntry parent = menu.path.get(menu.path.size() - 1);
+            populateGroupChildren(menu, parent);
+            assignGroupActions(menu, visibleEntries);
+            applyInteractionIcons(visibleEntries, menu.iconField, parent.icon, false);
+        }
 
         int firstSelectable = -1;
         int backIndex = -1;
@@ -533,8 +760,13 @@ public final class Bridge {
         for (InteractionEntry entry : visibleEntries) {
             Object row = entry.group
                     ? createInteractionRow(menu, entry.name + "  >", entry.action, entry.icon)
-                    : entry.actionRow;
+                    : entry.interactionAction.row;
             menu.rows.add(row);
+            if (!entry.group && (entry.name == null
+                    ? entry.interactionAction.originalName != null
+                    : !entry.name.equals(entry.interactionAction.originalName))) {
+                menu.nameField.set(row, entry.name);
+            }
             if (firstSelectable < 0 && isInteractionRowSelectable(menu, row)) {
                 firstSelectable = menu.rows.size() - 1;
             }
@@ -564,11 +796,17 @@ public final class Bridge {
 
     private static void restoreInteractionMenu(InteractionMenu menu) {
         try {
-            restoreActionNames(menu.rootEntries, menu.nameField);
-            restoreActionIcons(menu.rootEntries, menu.iconField);
+            for (InteractionAction action : menu.actionRows) {
+                menu.nameField.set(action.row, action.originalName);
+                if (action.originalIconCaptured) {
+                    menu.iconField.set(action.row, action.originalIcon);
+                }
+            }
             menu.rows.clear();
             menu.rows.addAll(menu.prefixRows);
-            menu.rows.addAll(menu.actionRows);
+            for (InteractionAction action : menu.actionRows) {
+                menu.rows.add(action.row);
+            }
             menu.path.clear();
             menu.parentSelections.clear();
             if (!menu.rows.isEmpty()) {
@@ -580,28 +818,8 @@ public final class Bridge {
         }
     }
 
-    private static void restoreActionNames(ArrayList<InteractionEntry> entries, Field nameField) throws IllegalAccessException {
-        for (InteractionEntry entry : entries) {
-            if (entry.group) {
-                restoreActionNames(entry.children, nameField);
-            } else {
-                nameField.set(entry.actionRow, entry.originalName);
-            }
-        }
-    }
-
-    private static void setLeafLabels(ArrayList<InteractionEntry> entries, Field nameField) throws IllegalAccessException {
-        for (InteractionEntry entry : entries) {
-            if (entry.group) {
-                setLeafLabels(entry.children, nameField);
-            } else if (entry.name == null ? entry.originalName != null : !entry.name.equals(entry.originalName)) {
-                nameField.set(entry.actionRow, entry.name);
-            }
-        }
-    }
-
     private static boolean applyInteractionIcons(ArrayList<InteractionEntry> entries, Field iconField,
-                                                 Object parentIcon) {
+                                                 Object parentIcon, boolean recursive) {
         boolean found = false;
         try {
             for (InteractionEntry entry : entries) {
@@ -616,20 +834,23 @@ public final class Bridge {
                     if (entry.icon != null) {
                         found = true;
                     }
-                    found |= applyInteractionIcons(entry.children, iconField, entry.icon);
+                    if (recursive) {
+                        found |= applyInteractionIcons(entry.children, iconField, entry.icon, true);
+                    }
                     continue;
                 }
 
-                if (!entry.originalIconCaptured) {
-                    entry.originalIcon = iconField.get(entry.actionRow);
-                    entry.originalIconCaptured = true;
+                InteractionAction action = entry.interactionAction;
+                if (!action.originalIconCaptured) {
+                    action.originalIcon = iconField.get(action.row);
+                    action.originalIconCaptured = true;
                 }
-                Object icon = vanillaContextMenuIcon(entry.originalName);
+                Object icon = vanillaContextMenuIcon(action.originalName);
                 if (icon == null) {
                     icon = vanillaContextMenuIcon(entry.name);
                 }
                 if (icon == null) {
-                    icon = contextMenuIcon(entry.originalName);
+                    icon = contextMenuIcon(action.originalName);
                 }
                 if (icon == null) {
                     icon = contextMenuIcon(entry.name);
@@ -638,10 +859,10 @@ public final class Bridge {
                     icon = parentIcon;
                 }
                 if (icon != null && iconField.getType().isInstance(icon)) {
-                    iconField.set(entry.actionRow, icon);
+                    iconField.set(action.row, icon);
                     found = true;
                 } else {
-                    iconField.set(entry.actionRow, entry.originalIcon);
+                    iconField.set(action.row, action.originalIcon);
                 }
             }
         } catch (Throwable failure) {
@@ -650,14 +871,39 @@ public final class Bridge {
         return found;
     }
 
-    private static void restoreActionIcons(ArrayList<InteractionEntry> entries, Field iconField) throws IllegalAccessException {
-        for (InteractionEntry entry : entries) {
-            if (entry.group) {
-                restoreActionIcons(entry.children, iconField);
-            } else if (entry.originalIconCaptured) {
-                iconField.set(entry.actionRow, entry.originalIcon);
+    private static boolean applyFlatInteractionIcons(InteractionMenu menu) {
+        boolean found = false;
+        for (InteractionAction action : menu.actionRows) {
+            if (!action.originalIconCaptured) {
+                try {
+                    action.originalIcon = menu.iconField.get(action.row);
+                    action.originalIconCaptured = true;
+                } catch (IllegalAccessException failure) {
+                    logContextGroupingFailure(failure);
+                    continue;
+                }
+            }
+
+            Object icon = vanillaContextMenuIcon(action.originalName);
+            if (icon == null) icon = contextMenuIcon(action.originalName);
+            int separator = action.originalName == null ? -1 : action.originalName.indexOf(": ");
+            if (icon == null && separator >= 0) {
+                String groupName = action.originalName.substring(0, separator);
+                icon = vanillaContextMenuIcon(groupName);
+                if (icon == null) icon = contextMenuIcon(groupName);
+            }
+            try {
+                if (icon != null && menu.iconField.getType().isInstance(icon)) {
+                    menu.iconField.set(action.row, icon);
+                    found = true;
+                } else {
+                    menu.iconField.set(action.row, action.originalIcon);
+                }
+            } catch (IllegalAccessException failure) {
+                logContextGroupingFailure(failure);
             }
         }
+        return found;
     }
 
     private static void updateVisibleGroupIcons(InteractionMenu menu) {
@@ -708,7 +954,7 @@ public final class Bridge {
         private final Object rowsObject;
         private final ArrayList<Object> rows;
         private final ArrayList<Object> prefixRows = new ArrayList<>();
-        private final ArrayList<Object> actionRows = new ArrayList<>();
+        private final ArrayList<InteractionAction> actionRows = new ArrayList<>();
         private final ArrayList<InteractionEntry> rootEntries = new ArrayList<>();
         private final LinkedHashMap<Integer, InteractionEntry> groupsByAction = new LinkedHashMap<>();
         private final ArrayList<InteractionEntry> path = new ArrayList<>();
@@ -737,27 +983,39 @@ public final class Bridge {
     private static final class InteractionEntry {
         private final String name;
         private final boolean group;
-        private final Object actionRow;
-        private final String originalName;
+        private final InteractionAction interactionAction;
+        private final String path;
         private final ArrayList<InteractionEntry> children = new ArrayList<>();
+        private final ArrayList<InteractionAction> candidateActions = new ArrayList<>();
+        private boolean childrenLoaded;
         private Object icon;
-        private Object originalIcon;
-        private boolean originalIconCaptured;
         private int action;
 
-        private InteractionEntry(String name, boolean group, Object actionRow, String originalName) {
+        private InteractionEntry(String name, boolean group, InteractionAction interactionAction, String path) {
             this.name = name;
             this.group = group;
-            this.actionRow = actionRow;
+            this.interactionAction = interactionAction;
+            this.path = path;
+        }
+
+        private static InteractionEntry group(String name, String path) {
+            return new InteractionEntry(name, true, null, path);
+        }
+
+        private static InteractionEntry action(String name, InteractionAction action) {
+            return new InteractionEntry(name, false, action, null);
+        }
+    }
+
+    private static final class InteractionAction {
+        private final Object row;
+        private final String originalName;
+        private Object originalIcon;
+        private boolean originalIconCaptured;
+
+        private InteractionAction(Object row, String originalName) {
+            this.row = row;
             this.originalName = originalName;
-        }
-
-        private static InteractionEntry group(String name) {
-            return new InteractionEntry(name, true, null, null);
-        }
-
-        private static InteractionEntry action(String name, Object row, String originalName) {
-            return new InteractionEntry(name, false, row, originalName);
         }
     }
 
@@ -910,7 +1168,8 @@ public final class Bridge {
     }
 
     public static boolean interceptThirdPersonPoll() {
-        if (viewModeToggleKey > 0 && isPressed(viewModeToggleKey)
+        if (viewModeToggleKey > 0
+                && isPressedWithModifiers(viewModeToggleKey, viewModeModifiers)
                 && !isDown(INSERT_KEY)) {
             eat(viewModeToggleKey);
             toggleViewMode();
@@ -960,7 +1219,8 @@ public final class Bridge {
         boolean paused = callBoolean("zombie.GameTime", "isGamePaused");
 
         if (holdFreeCursor) {
-            boolean held = freeCursorKey > 0 && isDown(freeCursorKey);
+            boolean held = freeCursorKey > 0
+                    && isDownWithModifiers(freeCursorKey, freeCursorModifiers);
             setFreeCursorOverrideActive(held || autoCursorRequested || lootCursor || settingsCursor || paused);
             return;
         }
@@ -1030,6 +1290,31 @@ public final class Bridge {
         } catch (Throwable ignored) {
             return false;
         }
+    }
+
+    private static boolean isPressedWithModifiers(int key, int modifiers) {
+        return isPressed(key) && modifiersMatch(key, modifiers);
+    }
+
+    private static boolean isDownWithModifiers(int key, int modifiers) {
+        return isDown(key) && modifiersMatch(key, modifiers);
+    }
+
+    private static boolean modifiersMatch(int key, int modifiers) {
+        boolean shift = (key != LEFT_SHIFT_KEY && key != RIGHT_SHIFT_KEY)
+                && (isDown(LEFT_SHIFT_KEY) || isDown(RIGHT_SHIFT_KEY));
+        boolean control = (key != LEFT_CONTROL_KEY && key != RIGHT_CONTROL_KEY)
+                && (isDown(LEFT_CONTROL_KEY) || isDown(RIGHT_CONTROL_KEY));
+        boolean alt = (key != LEFT_ALT_KEY && key != RIGHT_ALT_KEY)
+                && (isDown(LEFT_ALT_KEY) || isDown(RIGHT_ALT_KEY));
+        return shift == ((modifiers & MODIFIER_SHIFT) != 0)
+                && control == ((modifiers & MODIFIER_CONTROL) != 0)
+                && alt == ((modifiers & MODIFIER_ALT) != 0);
+    }
+
+    private static int unpackModifiers(int packedModifiers, int shift) {
+        return (packedModifiers >>> shift)
+                & (MODIFIER_SHIFT | MODIFIER_CONTROL | MODIFIER_ALT);
     }
 
     private static int readMouseWheelState() {
