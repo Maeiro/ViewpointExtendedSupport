@@ -106,6 +106,7 @@ public final class Bridge {
     private static volatile Method screenHeight;
     private static volatile Object worldToScreen;
     private static volatile ALifeTargetAccess alifeTargetAccess;
+    private static volatile boolean alifeAimTargetFailureLogged;
 
     private static volatile long vanillaCursorHookCalls;
     private static volatile long viewpointCursorHookCalls;
@@ -587,6 +588,48 @@ public final class Bridge {
                 System.out.println("[Viewpoint Extended Support] A-Life interaction target bridge failed: "
                         + failure.getClass().getSimpleName() + ": " + failure.getMessage());
             }
+        }
+    }
+
+    public static Object getAimedALifeNpc() {
+        if (!isViewEnabled() || shouldSkipInteractionMenu()) return null;
+
+        ALifeTargetAccess access = getALifeTargetAccess();
+        if (access == null) return null;
+
+        try {
+            Object target = access.aimedInteractionObject.get(null);
+            if (target == null || !access.zombieClass.isInstance(target)
+                    || Boolean.TRUE.equals(access.isDead.invoke(target))
+                    || !isALifeNpc(target, access)) {
+                return null;
+            }
+            return target;
+        } catch (Throwable failure) {
+            if (debugLogging && !alifeAimTargetFailureLogged) {
+                alifeAimTargetFailureLogged = true;
+                System.out.println("[Viewpoint Extended Support] A-Life aimed target lookup failed: "
+                        + failure.getClass().getSimpleName() + ": " + failure.getMessage());
+            }
+            return null;
+        }
+    }
+
+    public static Object getAimedInteractionObject() {
+        if (!isViewEnabled() || shouldSkipInteractionMenu()) return null;
+
+        ALifeTargetAccess access = getALifeTargetAccess();
+        if (access == null) return null;
+
+        try {
+            return access.aimedInteractionObject.get(null);
+        } catch (Throwable failure) {
+            if (debugLogging && !alifeAimTargetFailureLogged) {
+                alifeAimTargetFailureLogged = true;
+                System.out.println("[Viewpoint Extended Support] Viewpoint aimed target lookup failed: "
+                        + failure.getClass().getSimpleName() + ": " + failure.getMessage());
+            }
+            return null;
         }
     }
 
@@ -1090,6 +1133,7 @@ public final class Bridge {
         private final Method getX;
         private final Method getY;
         private final Method getZ;
+        private final Field aimedInteractionObject;
         private final Method addPersonTarget;
         private final Method growTargetBox;
 
@@ -1102,6 +1146,7 @@ public final class Bridge {
             Class<?> isoObjectClass = Class.forName("zombie.iso.IsoObject");
             Class<?> lootTargetsClass = Class.forName("viewpoint.interact.LootTargets");
             Class<?> lootBoxesClass = Class.forName("viewpoint.interact.LootBoxes");
+            Class<?> interactActionsClass = Class.forName("viewpoint.interact.InteractActions");
             Class<?> kahluaTableClass = Class.forName("se.krka.kahlua.vm.KahluaTable");
 
             zombieClass = Class.forName("zombie.characters.IsoZombie");
@@ -1121,6 +1166,7 @@ public final class Bridge {
             getX = requiredPublicMethod(zombieClass, "getX");
             getY = requiredPublicMethod(zombieClass, "getY");
             getZ = requiredPublicMethod(zombieClass, "getZ");
+            aimedInteractionObject = requiredField(interactActionsClass, "aimed");
             addPersonTarget = requiredMethod(lootTargetsClass, "add",
                     int.class, squareClass, isoObjectClass);
             growTargetBox = requiredMethod(lootBoxesClass, "grow", int.class,

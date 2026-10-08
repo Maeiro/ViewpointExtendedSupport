@@ -1,5 +1,7 @@
 package maeiro.viewpointextendedsupport;
 
+import viewpoint.core.View;
+import viewpoint.interact.InteractActions;
 import viewpoint.interact.LootBoxes;
 import viewpoint.interact.LootTargets;
 import zombie.characters.IsoPlayer;
@@ -57,6 +59,25 @@ public final class ALifeInteractionTargetsTest {
         check(Math.abs(LootBoxes.lastBox[1] - 10.95f) < 0.001f
                         && Math.abs(LootBoxes.lastBox[4] - 11.55f) < 0.001f,
                 "the interaction box should be centered on the NPC shell");
+
+        View.enabled = true;
+        InteractActions.setAimed(visibleALifeNpc);
+        check(Bridge.getAimedALifeNpc() == visibleALifeNpc,
+                "the current Viewpoint aim should expose the matching A-Life NPC shell");
+        check(Bridge.getAimedInteractionObject() == visibleALifeNpc,
+                "the current Viewpoint aim should expose its raw interaction object");
+        InteractActions.setAimed(new IsoZombie());
+        check(Bridge.getAimedALifeNpc() == null,
+                "non-A-Life zombie targets must not be exposed as A-Life HUD targets");
+        check(Bridge.getAimedInteractionObject() instanceof IsoZombie,
+                "the raw interaction object should remain available for Lua-side A-Life detection");
+        View.enabled = false;
+        InteractActions.setAimed(visibleALifeNpc);
+        check(Bridge.getAimedALifeNpc() == null,
+                "the A-Life HUD target must be hidden outside Viewpoint mode");
+        check(Bridge.getAimedInteractionObject() == null,
+                "the raw interaction object must be hidden outside Viewpoint mode");
+        InteractActions.setAimed(null);
     }
 
     private static void check(boolean condition, String message) {

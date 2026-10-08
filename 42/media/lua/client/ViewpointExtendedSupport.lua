@@ -458,6 +458,8 @@ end
 
 local interactionMenuDiagnosticStates = {}
 local lastCharacterHarvestTarget
+local lastAimedALifeNpc
+local alifeNpcTagMenuFallbackLogged = false
 local lastALifeHarvestDiagnostic
 local lastALifeHarvestDiagnosticAt = 0
 
@@ -541,13 +543,17 @@ local function diagnoseCharacterHarvestTarget(target)
 
     if not isCharacter then
         lastCharacterHarvestTarget = nil
+        lastAimedALifeNpc = nil
         return
     end
+
+    local isALifeNpc = isProjectALifeNpc(target)
+    lastAimedALifeNpc = isALifeNpc and target or nil
     if target == lastCharacterHarvestTarget then return end
 
     lastCharacterHarvestTarget = target
     logInteractionMenuDiagnostic("target", "Viewpoint harvested a character target; Project A-Life NPC="
-        .. tostring(isProjectALifeNpc(target)))
+        .. tostring(isALifeNpc))
 end
 
 local function logALifeHarvestResult(message)
@@ -801,6 +807,207 @@ local function installLazyInteractionOptions()
     end
 end
 
+local function viewpointAimHudActive()
+    if not Support or type(Support.isViewEnabled) ~= "function" then return false end
+    local ok, enabled = pcall(Support.isViewEnabled)
+    if not ok or enabled ~= true then return false end
+    if type(Support.shouldSkipInteractionMenu) == "function" then
+        local skipOk, skip = pcall(Support.shouldSkipInteractionMenu)
+        if skipOk and skip == true then return false end
+    end
+    return true
+end
+
+local function aimedALifeNpc()
+    if Support and type(Support.getAimedInteractionObject) == "function" then
+        local ok, target = pcall(Support.getAimedInteractionObject)
+        if ok then
+            if target and isProjectALifeNpc(target) then
+                lastAimedALifeNpc = target
+                return target
+            end
+            lastAimedALifeNpc = nil
+            return nil
+        end
+    end
+
+    if Support and type(Support.getAimedALifeNpc) == "function" then
+        local ok, target = pcall(Support.getAimedALifeNpc)
+        if ok and target then
+            lastAimedALifeNpc = target
+            return target
+        end
+    end
+
+    if lastAimedALifeNpc then
+        if not alifeNpcTagMenuFallbackLogged then
+            print("[Viewpoint Extended Support] A-Life NPC tag using the confirmed interaction-menu target")
+            alifeNpcTagMenuFallbackLogged = true
+        end
+        return lastAimedALifeNpc
+    end
+    return nil
+end
+
+local function alifeNpcUid(target)
+    local speech = ProjectALife and ProjectALife.Speech
+    if type(speech) == "table" and type(speech.variable) == "function" then
+        local ok, uid = pcall(speech.variable, target, "ALifeUID")
+        if ok and uid ~= nil and uid ~= "" then return tostring(uid) end
+    end
+    if target and type(target.getModData) == "function" then
+        local ok, data = pcall(target.getModData, target)
+        if ok and type(data) == "table" and data.ProjectALifeUID ~= nil
+                and data.ProjectALifeUID ~= "" then
+            return tostring(data.ProjectALifeUID)
+        end
+    end
+    return nil
+end
+
+local ALIFE_NPC_TAG_LOWERING_TILES = 0.2
+
+local function placeNpcTagAboveAimedNpc(label, target)
+    if not target or not Support or type(Support.projectCompanionDogTag) ~= "function" then
+        return false
+    end
+
+    local ok, projected = pcall(function()
+        return Support.projectCompanionDogTag(0, target:getX(), target:getY(),
+            target:getZ() - ALIFE_NPC_TAG_LOWERING_TILES)
+    end)
+    if not ok or not projected or not projected.size or projected:size() < 2 then return false end
+
+    local okPosition, screenX, screenY = pcall(function()
+        return projected:get(0) - getPlayerScreenLeft(0),
+            projected:get(1) - getPlayerScreenTop(0)
+    end)
+    if not okPosition then return false end
+
+    label:setX(screenX - label.width / 2)
+    label:setY(screenY - label.height - 4)
+    return true
+end
+
+local alifeNpcTagIntegrationLogged = false
+local alifeNpcTagWaitingLogged = false
+local alifeNpcTagLabelLogged = false
+local alifeNpcTagTargetLogged = false
+local alifeNpcTagNoAimLogged = false
+local alifeNpcTagUidFailureLogged = false
+local alifeNpcTagDataFailureLogged = false
+local alifeNpcTagProjectionLogged = false
+
+local function installALifeNpcTagIntegration()
+    local npcTags = ProjectALifeJimmy and ProjectALifeJimmy.NpcTags
+    if type(npcTags) ~= "table" or type(npcTags.hovered) ~= "function"
+            or type(npcTags.extraLines) ~= "function" then
+        if not alifeNpcTagWaitingLogged then
+            print("[Viewpoint Extended Support] A-Life NPC tag integration is waiting for ProjectALifeJimmy.NpcTags")
+            alifeNpcTagWaitingLogged = true
+        end
+        return
+    end
+
+    if npcTags._viewpointSupportHovered ~= npcTags.hovered then
+        local originalHovered = npcTags.hovered
+        local wrapper = function(playerNum, player)
+            npcTags._viewpointSupportAimedTarget = nil
+            if not viewpointAimHudActive() then return originalHovered(playerNum, player) end
+            local target = aimedALifeNpc()
+            if not target and not alifeNpcTagNoAimLogged then
+                print("[Viewpoint Extended Support] A-Life NPC tag has no Viewpoint aimed NPC target")
+                alifeNpcTagNoAimLogged = true
+            end
+            local uid = target and alifeNpcUid(target) or nil
+            if not uid then
+                if target and not alifeNpcTagUidFailureLogged then
+                    print("[Viewpoint Extended Support] A-Life NPC tag target has no A-Life UID")
+                    alifeNpcTagUidFailureLogged = true
+                end
+                return nil
+            end
+            if not alifeNpcTagTargetLogged then
+                print("[Viewpoint Extended Support] A-Life NPC tag resolved an aimed NPC")
+                alifeNpcTagTargetLogged = true
+            end
+            npcTags._viewpointSupportAimedTarget = target
+            return { uid = uid, shell = target }, 0, 0, 1
+        end
+        npcTags.hovered = wrapper
+        npcTags._viewpointSupportHovered = wrapper
+    end
+
+    if npcTags._viewpointSupportExtraLines ~= npcTags.extraLines then
+        local originalExtraLines = npcTags.extraLines
+        local wrapper = function(...)
+            local lines = originalExtraLines(...)
+            if not viewpointAimHudActive() then return lines end
+
+            local withoutSpots
+            for index, line in ipairs(lines) do
+                if type(line) == "table" and line.spot ~= nil then
+                    if not withoutSpots then
+                        withoutSpots = {}
+                        for previous = 1, index - 1 do
+                            withoutSpots[previous] = lines[previous]
+                        end
+                    end
+                    local copy = {}
+                    for key, value in pairs(line) do
+                        if key ~= "spot" then copy[key] = value end
+                    end
+                    withoutSpots[index] = copy
+                elseif withoutSpots then
+                    withoutSpots[index] = line
+                end
+            end
+            return withoutSpots or lines
+        end
+        npcTags.extraLines = wrapper
+        npcTags._viewpointSupportExtraLines = wrapper
+    end
+    if not alifeNpcTagIntegrationLogged then
+        print("[Viewpoint Extended Support] A-Life NPC tag hover integration installed")
+        alifeNpcTagIntegrationLogged = true
+    end
+
+    local label = npcTags.label
+    if label and type(label.prerender) == "function"
+            and label._viewpointSupportPrerender ~= label.prerender then
+        local originalPrerender = label.prerender
+        local wrapper = function(self, ...)
+            local result = originalPrerender(self, ...)
+            if viewpointAimHudActive() then
+                local target = npcTags._viewpointSupportAimedTarget
+                if target and not self.show then
+                    if not alifeNpcTagDataFailureLogged then
+                        print("[Viewpoint Extended Support] A-Life NPC tag target found, but its tag data produced no label")
+                        alifeNpcTagDataFailureLogged = true
+                    end
+                elseif self.show then
+                    local projected = placeNpcTagAboveAimedNpc(self, target)
+                    if not projected then self.show = nil end
+                    if not alifeNpcTagProjectionLogged then
+                        print("[Viewpoint Extended Support] A-Life NPC tag head projection "
+                            .. (projected and "succeeded" or "failed"))
+                        alifeNpcTagProjectionLogged = true
+                    end
+                end
+            end
+            return result
+        end
+        label.prerender = wrapper
+        label._viewpointSupportPrerender = wrapper
+    end
+    if label and type(label.prerender) == "function" and not alifeNpcTagLabelLogged then
+        print("[Viewpoint Extended Support] A-Life NPC tag label hook installed")
+        alifeNpcTagLabelLogged = true
+    end
+end
+
+local COMPANION_DOG_TAG_HEIGHT_ADJUSTMENT = 0.5
+
 local function installCompanionDogTagProjection()
     if not Support or type(Support.projectCompanionDogTag) ~= "function"
             or not UIManager or not UIManager.getUI then return end
@@ -823,7 +1030,8 @@ local function installCompanionDogTagProjection()
                                 and Support.isViewEnabled() then
                             local dog = self.dog
                             local projectedOk, projected = pcall(Support.projectCompanionDogTag,
-                                self.playerNum, dog:getX(), dog:getY(), dog:getZ())
+                                self.playerNum, dog:getX(), dog:getY(),
+                                dog:getZ() - COMPANION_DOG_TAG_HEIGHT_ADJUSTMENT)
                             if projectedOk and projected and projected.size
                                     and projected:size() >= 2 then
                                 local screenX = projected:get(0) - getPlayerScreenLeft(self.playerNum)
@@ -867,6 +1075,7 @@ Events.OnTick.Add(function()
         installContextMenuIconsIntegration()
         installViewpointVanillaMenuIconsIntegration()
         installLazyInteractionOptions()
+        installALifeNpcTagIntegration()
         installCompanionDogTagProjection()
     end
     updateInteractionMenuSuppression()
@@ -880,6 +1089,7 @@ Events.OnGameStart.Add(function()
     installContextMenuIconsIntegration()
     installViewpointVanillaMenuIconsIntegration()
     installLazyInteractionOptions()
+    installALifeNpcTagIntegration()
     installCompanionDogTagProjection()
     if optionValue(options.startViewpoint, true) and Support and Support.enableViewpoint then
         Support.enableViewpoint()
@@ -887,4 +1097,4 @@ Events.OnGameStart.Add(function()
 end)
 
 syncConfiguration()
-logInteractionMenuDiagnostic("diagnostics", "interaction diagnostics active (0.4.28)")
+logInteractionMenuDiagnostic("diagnostics", "interaction diagnostics active (0.4.34)")
