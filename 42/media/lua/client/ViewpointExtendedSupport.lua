@@ -1097,4 +1097,4 @@ Events.OnGameStart.Add(function()
 end)
 
 syncConfiguration()
-logInteractionMenuDiagnostic("diagnostics", "interaction diagnostics active (0.4.34)")
+logInteractionMenuDiagnostic("diagnostics", "interaction diagnostics active (0.4.35)")

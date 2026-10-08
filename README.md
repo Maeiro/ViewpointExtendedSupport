@@ -12,6 +12,8 @@ By default, Viewpoint shows a single `View options` row when you look at an inte
 
 Viewpoint interaction rows retain icons attached to the original vanilla context-menu actions, including item-specific textures supplied through `itemForTexture` in nested actions. When Context Menu Icons Core and an icon pack are active, matching pack icons are also used as a fallback; the core mod is optional.
 
+When Project A-Life and Companion Dogs are active, Friendly and Allied A-Life NPCs are excluded from the dog's threat scans; other stances and regular zombies remain detectable.
+
 Dependencies:
 
 - ZombieBuddy 2.3.0 or newer
