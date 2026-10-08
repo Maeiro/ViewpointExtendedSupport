@@ -456,25 +456,207 @@ local function publishVanillaMenuIcons(captured)
     end
 end
 
+local interactionMenuDiagnosticStates = {}
+local lastCharacterHarvestTarget
+local lastALifeHarvestDiagnostic
+local lastALifeHarvestDiagnosticAt = 0
+
+local function logInteractionMenuDiagnostic(key, message)
+    if interactionMenuDiagnosticStates[key] == message then return end
+    interactionMenuDiagnosticStates[key] = message
+    print("[Viewpoint Extended Support] interaction menu: " .. message)
+end
+
+local function isProjectALifeNpc(target)
+    if not target then return false end
+
+    local speech = ProjectALife and ProjectALife.Speech
+    if type(speech) == "table" and type(speech.variable) == "function" then
+        local ok, uid = pcall(speech.variable, target, "ALifeUID")
+        if ok and uid ~= nil and uid ~= "" then return true end
+    end
+
+    if type(target.getModData) == "function" then
+        local ok, data = pcall(target.getModData, target)
+        return ok and type(data) == "table" and type(data.ProjectALifeUID) == "string"
+            and data.ProjectALifeUID ~= ""
+    end
+    return false
+end
+
+local function collectContextOptions(menu, options, visited)
+    if not menu or visited[menu] or type(menu.options) ~= "table" then return end
+    visited[menu] = true
+
+    for _, option in ipairs(menu.options) do
+        if type(option) == "table" then
+            options[option] = true
+            if option.subOption and type(menu.getSubMenu) == "function" then
+                local ok, submenu = pcall(function() return menu:getSubMenu(option.subOption) end)
+                if ok then collectContextOptions(submenu, options, visited) end
+            end
+        end
+    end
+end
+
+local function linkNewContextActionsToTarget(menu, target, existingOptions, visited)
+    if not menu or visited[menu] or type(menu.options) ~= "table" then return 0 end
+    visited[menu] = true
+
+    local linked = 0
+    for _, option in ipairs(menu.options) do
+        if type(option) == "table" then
+            if not existingOptions[option] then
+                local lastParameter = 0
+                local alreadyTargetsNpc = option.target == target
+                for index = 1, 10 do
+                    local parameter = option["param" .. index]
+                    if parameter ~= nil then lastParameter = index end
+                    if parameter == target then alreadyTargetsNpc = true end
+                end
+                if option.onSelect and not option.subOption and not alreadyTargetsNpc
+                        and lastParameter < 10 then
+                    option["param" .. (lastParameter + 1)] = target
+                    linked = linked + 1
+                end
+            end
+            if option.subOption and type(menu.getSubMenu) == "function" then
+                local ok, submenu = pcall(function() return menu:getSubMenu(option.subOption) end)
+                if ok then
+                    linked = linked + linkNewContextActionsToTarget(submenu, target,
+                        existingOptions, visited)
+                end
+            end
+        end
+    end
+    return linked
+end
+
+local function diagnoseCharacterHarvestTarget(target)
+    local isCharacter = false
+    if target and type(instanceof) == "function" then
+        local ok, result = pcall(instanceof, target, "IsoGameCharacter")
+        isCharacter = ok and result == true
+    end
+
+    if not isCharacter then
+        lastCharacterHarvestTarget = nil
+        return
+    end
+    if target == lastCharacterHarvestTarget then return end
+
+    lastCharacterHarvestTarget = target
+    logInteractionMenuDiagnostic("target", "Viewpoint harvested a character target; Project A-Life NPC="
+        .. tostring(isProjectALifeNpc(target)))
+end
+
+local function logALifeHarvestResult(message)
+    local now = type(getTimestampMs) == "function" and getTimestampMs() or 0
+    if message == lastALifeHarvestDiagnostic and now - lastALifeHarvestDiagnosticAt < 3000 then return end
+    lastALifeHarvestDiagnostic = message
+    lastALifeHarvestDiagnosticAt = now
+    print("[Viewpoint Extended Support] A-Life interaction harvest: " .. message)
+end
+
 local function installViewpointVanillaMenuIconsIntegration()
     local interactions = ViewpointInteract
-    if type(interactions) ~= "table" or type(interactions.harvest) ~= "function"
-            or type(ISWorldObjectContextMenu) ~= "table"
-            or type(ISWorldObjectContextMenu.createMenu) ~= "function" then return end
+    if type(interactions) ~= "table" then
+        logInteractionMenuDiagnostic("harvest-hook", "waiting for ViewpointInteract")
+        return
+    end
+    if type(interactions.harvest) ~= "function" then
+        logInteractionMenuDiagnostic("harvest-hook", "ViewpointInteract.harvest is unavailable")
+        return
+    end
+    if type(ISWorldObjectContextMenu) ~= "table"
+            or type(ISWorldObjectContextMenu.createMenu) ~= "function" then
+        logInteractionMenuDiagnostic("harvest-hook", "vanilla world context-menu builder is unavailable")
+        return
+    end
 
     if interactions._extendedSupportVanillaIconHarvest == interactions.harvest
             or interactions._extendedSupportLazyHarvest == interactions.harvest then return end
     local originalHarvest = interactions.harvest
     local worldMenu = ISWorldObjectContextMenu
     local wrapper = function(...)
+        local player, target = ...
+        local isALifeNpc = isProjectALifeNpc(target)
+        local contextMenuClass = ISContextMenu
+        local originalContextMenuGet = isALifeNpc and type(contextMenuClass) == "table"
+            and contextMenuClass.get or nil
+        local capturedContext
+        local interceptContextMenuGet
+        if type(originalContextMenuGet) == "function" then
+            interceptContextMenuGet = function(...)
+                local menu = originalContextMenuGet(...)
+                if capturedContext == nil then capturedContext = menu end
+                return menu
+            end
+            contextMenuClass.get = interceptContextMenuGet
+        end
+
+        local originalTriggerEvent = isALifeNpc and type(triggerEvent) == "function" and triggerEvent or nil
+        local fillEventTriggered = false
+        local linkedContextActions = 0
+        local interceptTriggerEvent
+        if originalTriggerEvent then
+            interceptTriggerEvent = function(eventName, ...)
+                local args = { ... }
+                local eventContext = eventName == "OnFillWorldObjectContextMenu" and args[2] or nil
+                local isTargetFill = eventContext ~= nil and eventContext == capturedContext
+                local existingOptions
+                if isTargetFill then
+                    existingOptions = {}
+                    collectContextOptions(eventContext, existingOptions, {})
+                end
+                local result = originalTriggerEvent(eventName, ...)
+                if isTargetFill then
+                    fillEventTriggered = true
+                    linkedContextActions = linkedContextActions + linkNewContextActionsToTarget(
+                        eventContext, target, existingOptions, {})
+                end
+                return result
+            end
+            triggerEvent = interceptTriggerEvent
+        end
+
         local captured = {}
         local originalCreateMenu = worldMenu.createMenu
         local menuBuilder = worldMenu._NB_old_createMenu
         if type(menuBuilder) ~= "function" then
             menuBuilder = originalCreateMenu
         end
+        local createMenuCalled = false
+        local fetchCount
+        local recoveredContext = false
+        local filledRecoveredContext = false
         local interceptCreateMenu = function(...)
+            createMenuCalled = true
             local menu = menuBuilder(...)
+            if isALifeNpc and capturedContext ~= nil then
+                local fetch = worldMenu.fetchVars
+                fetchCount = type(fetch) == "table" and tonumber(fetch.c) or nil
+                if not fillEventTriggered and originalTriggerEvent and player
+                        and type(player.getPlayerNum) == "function" then
+                    local ok, playerNum = pcall(player.getPlayerNum, player)
+                    if ok then
+                        local existingOptions = {}
+                        collectContextOptions(capturedContext, existingOptions, {})
+                        local fillOk = pcall(originalTriggerEvent, "OnFillWorldObjectContextMenu", playerNum,
+                            capturedContext, { target }, false)
+                        filledRecoveredContext = fillOk
+                        fillEventTriggered = fillOk
+                        if fillOk then
+                            linkedContextActions = linkedContextActions + linkNewContextActionsToTarget(
+                                capturedContext, target, existingOptions, {})
+                        end
+                    end
+                end
+                if type(menu) ~= "table" then
+                    menu = capturedContext
+                    recoveredContext = true
+                end
+            end
             captureVanillaMenuIcons(menu, captured, {})
             return menu
         end
@@ -483,6 +665,35 @@ local function installViewpointVanillaMenuIconsIntegration()
         local ok, result = pcall(originalHarvest, ...)
         if worldMenu.createMenu == interceptCreateMenu then
             worldMenu.createMenu = originalCreateMenu
+        end
+        if interceptTriggerEvent and triggerEvent == interceptTriggerEvent then
+            triggerEvent = originalTriggerEvent
+        end
+        if interceptContextMenuGet and contextMenuClass.get == interceptContextMenuGet then
+            contextMenuClass.get = originalContextMenuGet
+        end
+
+        if isALifeNpc then
+            local resultSummary
+            if not ok then
+                resultSummary = "harvest failed: " .. tostring(result)
+            elseif type(result) == "table" and type(result.labels) == "table" then
+                local labels = {}
+                for index = 1, math.min(#result.labels, 8) do
+                    labels[index] = tostring(result.labels[index])
+                end
+                resultSummary = "menu labels=" .. tostring(#result.labels)
+                    .. ", seen=" .. tostring(result.seen)
+                    .. ", entries=" .. table.concat(labels, " | ")
+            else
+                resultSummary = "no labels; reason=" .. tostring(type(result) == "table" and result.why or result)
+            end
+            logALifeHarvestResult(resultSummary .. "; createMenu=" .. tostring(createMenuCalled)
+                .. ", fetchCount=" .. tostring(fetchCount)
+                .. ", fillEvent=" .. tostring(fillEventTriggered)
+                .. ", npcActionsLinked=" .. tostring(linkedContextActions)
+                .. ", contextRecovered=" .. tostring(recoveredContext)
+                .. ", recoveredOnFill=" .. tostring(filledRecoveredContext))
         end
 
         if ok and result and type(result.labels) == "table" then
@@ -495,6 +706,7 @@ local function installViewpointVanillaMenuIconsIntegration()
     end
     interactions.harvest = wrapper
     interactions._extendedSupportVanillaIconHarvest = wrapper
+    logInteractionMenuDiagnostic("harvest-hook", "Viewpoint interaction harvest hook installed")
 
     if type(interactions.harvestVehicle) == "function"
             and interactions._extendedSupportVanillaIconVehicle ~= interactions.harvestVehicle
@@ -516,6 +728,7 @@ local pendingInteractionTicks = 0
 local lazyInteractionWarningLogged = false
 
 local function lazyInteractionHarvest(originalHarvest, player, target)
+    diagnoseCharacterHarvestTarget(target)
     if not optionValue(options.lazyInteractionOptions, true)
             or not Support or type(Support.requestInteractionOptions) ~= "function" then
         pendingInteractionTarget = nil
@@ -571,6 +784,9 @@ local function installLazyInteractionOptions()
         end
         interactions.harvest = wrapper
         interactions._extendedSupportLazyHarvest = wrapper
+        logInteractionMenuDiagnostic("lazy-hook", "deferred interaction harvest hook installed")
+    elseif type(interactions.harvest) == "function" then
+        logInteractionMenuDiagnostic("lazy-hook", "waiting for the vanilla interaction harvest hook")
     end
 
     if type(interactions.harvestVehicle) == "function"
@@ -671,3 +887,4 @@ Events.OnGameStart.Add(function()
 end)
 
 syncConfiguration()
+logInteractionMenuDiagnostic("diagnostics", "interaction diagnostics active (0.4.28)")

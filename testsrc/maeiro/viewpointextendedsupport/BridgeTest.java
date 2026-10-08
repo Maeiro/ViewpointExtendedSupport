@@ -306,6 +306,7 @@ public final class BridgeTest {
         check(Bridge.adjustThirdPersonBoom(5.0f) == 5.0f,
                 "disabled Viewpoint mode must preserve the original camera distance");
         check(Bridge.overrideMouseCursorVisibility(true), "vanilla cursor visibility must be preserved outside Viewpoint");
+        ALifeInteractionTargetsTest.run();
 
         System.out.println("ViewpointExtendedSupport BridgeTest: PASS");
     }

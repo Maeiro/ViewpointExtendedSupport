@@ -105,6 +105,7 @@ public final class Bridge {
     private static volatile Method screenWidth;
     private static volatile Method screenHeight;
     private static volatile Object worldToScreen;
+    private static volatile ALifeTargetAccess alifeTargetAccess;
 
     private static volatile long vanillaCursorHookCalls;
     private static volatile long viewpointCursorHookCalls;
@@ -126,6 +127,10 @@ public final class Bridge {
     private static volatile boolean diagnosticThirdPerson;
     private static volatile boolean diagnosticVehicle;
     private static volatile boolean contextGroupingWarningLogged;
+    private static volatile boolean alifeTargetAccessWarningLogged;
+    private static volatile boolean alifeTargetHookLogged;
+    private static volatile boolean alifeTargetAddedLogged;
+    private static volatile boolean alifeTargetFailureLogged;
 
     static {
         Exposer.exposeClass(Bridge.class, "ViewpointExtendedSupport");
@@ -516,6 +521,104 @@ public final class Bridge {
             return original;
         }
         return Math.max(THIRD_PERSON_BOOM_MIN, original + thirdPersonZoomOffset);
+    }
+
+    public static void addALifeInteractionTargets(Object player, Object centerSquare) {
+        if (player == null || centerSquare == null) return;
+
+        ALifeTargetAccess access = getALifeTargetAccess();
+        if (access == null) return;
+
+        try {
+            Object world = access.worldInstance.get(null);
+            Object cell = world == null ? null : access.currentCell.get(world);
+            if (cell == null) return;
+
+            int centerX = access.squareX.getInt(centerSquare);
+            int centerY = access.squareY.getInt(centerSquare);
+            int centerZ = access.squareZ.getInt(centerSquare);
+            if (debugLogging && !alifeTargetHookLogged) {
+                alifeTargetHookLogged = true;
+                System.out.println("[Viewpoint Extended Support] A-Life interaction target hook active; scanning visible NPC shells");
+            }
+
+            int added = 0;
+            for (int y = -2; y <= 2; y++) {
+                for (int x = -2; x <= 2; x++) {
+                    Object square = access.getGridSquare.invoke(cell,
+                            centerX + x, centerY + y, centerZ);
+                    if (square == null) continue;
+
+                    Object movingObjects = access.getMovingObjects.invoke(square);
+                    if (!(movingObjects instanceof java.util.List<?> objects)) continue;
+
+                    for (Object candidate : objects) {
+                        if (!access.zombieClass.isInstance(candidate)
+                                || Boolean.TRUE.equals(access.isDead.invoke(candidate))
+                                || !isALifeNpc(candidate, access)
+                                || !Boolean.TRUE.equals(access.canSee.invoke(player, candidate))) {
+                            continue;
+                        }
+
+                        float targetX = ((Number) access.getX.invoke(candidate)).floatValue();
+                        float targetY = ((Number) access.getY.invoke(candidate)).floatValue();
+                        float targetZ = ((Number) access.getZ.invoke(candidate)).floatValue()
+                                * 2.4494896f;
+                        int targetIndex = ((Number) access.addPersonTarget.invoke(null,
+                                access.personTargetKind.getInt(null), null, candidate)).intValue();
+                        if (targetIndex < 0) continue;
+
+                        access.growTargetBox.invoke(null, targetIndex,
+                                targetX - 0.3f, targetY - 0.3f, targetZ,
+                                targetX + 0.3f, targetY + 0.3f, targetZ + 1.6f);
+                        added++;
+                    }
+                }
+            }
+
+            if (added > 0 && debugLogging && !alifeTargetAddedLogged) {
+                alifeTargetAddedLogged = true;
+                System.out.println("[Viewpoint Extended Support] added " + added
+                        + " visible A-Life NPC(s) to Viewpoint interaction targets");
+            }
+        } catch (Throwable failure) {
+            if (debugLogging && !alifeTargetFailureLogged) {
+                alifeTargetFailureLogged = true;
+                System.out.println("[Viewpoint Extended Support] A-Life interaction target bridge failed: "
+                        + failure.getClass().getSimpleName() + ": " + failure.getMessage());
+            }
+        }
+    }
+
+    private static boolean isALifeNpc(Object candidate, ALifeTargetAccess access) throws Exception {
+        Object modData = access.getModData.invoke(candidate);
+        if (modData == null) return false;
+        Object uid = access.getModDataValue.invoke(modData, "ProjectALifeUID");
+        return uid != null && !uid.toString().isEmpty();
+    }
+
+    private static ALifeTargetAccess getALifeTargetAccess() {
+        ALifeTargetAccess access = alifeTargetAccess;
+        if (access != null) return access;
+
+        synchronized (Bridge.class) {
+            access = alifeTargetAccess;
+            if (access != null) return access;
+            if (alifeTargetAccessWarningLogged) return null;
+
+            try {
+                access = new ALifeTargetAccess();
+                alifeTargetAccess = access;
+                return access;
+            } catch (Throwable failure) {
+                alifeTargetAccessWarningLogged = true;
+                if (debugLogging) {
+                    System.out.println("[Viewpoint Extended Support] A-Life interaction target bridge unavailable: "
+                            + failure.getClass().getSimpleName() + ": " + failure.getMessage());
+                }
+                return null;
+            }
+        }
     }
 
     @SuppressWarnings("unchecked")
@@ -947,6 +1050,82 @@ public final class Bridge {
             contextGroupingWarningLogged = true;
             System.out.println("[Viewpoint Extended Support] could not update interaction menu: "
                     + failure.getClass().getSimpleName());
+        }
+    }
+
+    private static Field requiredField(Class<?> type, String name) throws ReflectiveOperationException {
+        Field field = type.getDeclaredField(name);
+        field.setAccessible(true);
+        return field;
+    }
+
+    private static Method requiredMethod(Class<?> type, String name, Class<?>... parameterTypes)
+            throws ReflectiveOperationException {
+        Method method = type.getDeclaredMethod(name, parameterTypes);
+        method.setAccessible(true);
+        return method;
+    }
+
+    private static Method requiredPublicMethod(Class<?> type, String name, Class<?>... parameterTypes)
+            throws ReflectiveOperationException {
+        Method method = type.getMethod(name, parameterTypes);
+        method.setAccessible(true);
+        return method;
+    }
+
+    private static final class ALifeTargetAccess {
+        private final Class<?> zombieClass;
+        private final Field worldInstance;
+        private final Field currentCell;
+        private final Field squareX;
+        private final Field squareY;
+        private final Field squareZ;
+        private final Field personTargetKind;
+        private final Method getGridSquare;
+        private final Method getMovingObjects;
+        private final Method isDead;
+        private final Method getModData;
+        private final Method getModDataValue;
+        private final Method canSee;
+        private final Method getX;
+        private final Method getY;
+        private final Method getZ;
+        private final Method addPersonTarget;
+        private final Method growTargetBox;
+
+        private ALifeTargetAccess() throws ReflectiveOperationException {
+            Class<?> worldClass = Class.forName("zombie.iso.IsoWorld");
+            Class<?> cellClass = Class.forName("zombie.iso.IsoCell");
+            Class<?> squareClass = Class.forName("zombie.iso.IsoGridSquare");
+            Class<?> movingObjectClass = Class.forName("zombie.iso.IsoMovingObject");
+            Class<?> playerClass = Class.forName("zombie.characters.IsoPlayer");
+            Class<?> isoObjectClass = Class.forName("zombie.iso.IsoObject");
+            Class<?> lootTargetsClass = Class.forName("viewpoint.interact.LootTargets");
+            Class<?> lootBoxesClass = Class.forName("viewpoint.interact.LootBoxes");
+            Class<?> kahluaTableClass = Class.forName("se.krka.kahlua.vm.KahluaTable");
+
+            zombieClass = Class.forName("zombie.characters.IsoZombie");
+            worldInstance = requiredField(worldClass, "instance");
+            currentCell = requiredField(worldClass, "currentCell");
+            squareX = requiredField(squareClass, "x");
+            squareY = requiredField(squareClass, "y");
+            squareZ = requiredField(squareClass, "z");
+            personTargetKind = requiredField(lootTargetsClass, "PERSON");
+            getGridSquare = requiredPublicMethod(cellClass, "getGridSquare",
+                    int.class, int.class, int.class);
+            getMovingObjects = requiredPublicMethod(squareClass, "getMovingObjects");
+            isDead = requiredPublicMethod(zombieClass, "isDead");
+            getModData = requiredPublicMethod(zombieClass, "getModData");
+            getModDataValue = requiredPublicMethod(kahluaTableClass, "rawget", Object.class);
+            canSee = requiredPublicMethod(playerClass, "CanSee", movingObjectClass);
+            getX = requiredPublicMethod(zombieClass, "getX");
+            getY = requiredPublicMethod(zombieClass, "getY");
+            getZ = requiredPublicMethod(zombieClass, "getZ");
+            addPersonTarget = requiredMethod(lootTargetsClass, "add",
+                    int.class, squareClass, isoObjectClass);
+            growTargetBox = requiredMethod(lootBoxesClass, "grow", int.class,
+                    float.class, float.class, float.class,
+                    float.class, float.class, float.class);
         }
     }
 
