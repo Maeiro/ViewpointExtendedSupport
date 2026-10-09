@@ -1,8 +1,8 @@
 name=Viewpoint Extended Support
 id=ViewpointExtendedSupport
 author=Maeiro
-description=Configurable vehicle camera switching, third-person camera zoom, deferred cascading interaction menus, vanilla and Simple Context Menu Icons support, Companion Dogs and A-Life compatibility, key rebinding, and cursor support for Viewpoint.
-modversion=0.4.35
+description=Viewpoint camera, cursor, and interaction-menu improvements, with Project A-Life NPC interaction and tag support plus Companion Dogs compatibility.
+modversion=0.4.36
 versionMin=42.20
 require=\ZombieBuddy,\Viewpoint
 ZBVersionMin=2.3.0
