@@ -94,39 +94,46 @@ local function isVisible(ui)
     return ok and value == true
 end
 
-local function hasClassName(ui, names)
-    if not ui or not instanceof then return false end
-    if type(ui) ~= "table" then
-        local ok, uiTable = pcall(function() return ui:getTable() end)
-        if not ok or not uiTable then return false end
-        ui = uiTable
-    end
-    for _, name in ipairs(names) do
-        local ok, value = pcall(function() return instanceof(ui, name) end)
-        if ok and value then return true end
-    end
-    return false
-end
+local VEHICLE_CURSOR_WINDOWS = {
+    ISRadialMenu = true,
+    ISWorldMap = true,
+    ISMapWrapper = true,
+    ISCharacterInfoWindow = true,
+}
 
-local UI_CLASSES = {
-    "ISInventoryPage",
+local ON_FOOT_CURSOR_WINDOWS = {
+    ISRadialMenu = true,
+    ISWorldMap = true,
+    ISMapWrapper = true,
+    ISCraftingUI = true,
+    ISHandcraftWindow = true,
+    ISBuildWindow = true,
+    ISCharacterInfoWindow = true,
+}
+
+local CURSOR_WINDOW_CLASS_NAMES = {
     "ISRadialMenu",
+    "ISWorldMap",
+    "ISMapWrapper",
     "ISCraftingUI",
     "ISHandcraftWindow",
+    "ISBuildWindow",
     "ISCharacterInfoWindow",
-    "ISHealthPanel",
-    "ISVehicleMechanics",
-    "ISLootWindow",
-    "ISModalDialog",
-    "ISModalRichText",
-    "ISEntityUI",
-    "ISTradingUI",
 }
+local activeCursorWindows = {}
 
 local function visibleInventory(getter)
     if type(getter) ~= "function" then return false end
     local ok, ui = pcall(getter, 0)
     return ok and isVisible(ui)
+end
+
+local function playerIsInVehicle()
+    if type(getSpecificPlayer) ~= "function" then return false end
+    local ok, player = pcall(getSpecificPlayer, 0)
+    if not ok or not player or not player.getVehicle then return false end
+    local okVehicle, vehicle = pcall(function() return player:getVehicle() end)
+    return okVehicle and vehicle ~= nil
 end
 
 local function visibleErgonomicInventory()
@@ -156,18 +163,44 @@ local function visibleGameWindow()
         return true
     end
 
-    if not UIManager or not UIManager.getUI then return false end
-    local ok, uiList = pcall(function() return UIManager.getUI() end)
-    if not ok or not uiList or not uiList.size then return false end
-    local okSize, size = pcall(function() return uiList:size() end)
-    if not okSize then return false end
-    for i = 0, size - 1 do
-        local okUi, ui = pcall(function() return uiList:get(i) end)
-        if okUi and isVisible(ui) and hasClassName(ui, UI_CLASSES) then
+    local allowedClasses = playerIsInVehicle() and VEHICLE_CURSOR_WINDOWS or ON_FOOT_CURSOR_WINDOWS
+    for window, className in pairs(activeCursorWindows) do
+        if allowedClasses[className] and isVisible(window) then
             return true
         end
     end
     return false
+end
+
+local updateCursorRequest
+
+local function installCursorWindowHook(className)
+    local windowClass = _G[className]
+    if type(windowClass) ~= "table" or windowClass._viewpointSupportCursorHooks then return end
+
+    local originalAdd = windowClass.addToUIManager
+    local originalRemove = windowClass.removeFromUIManager
+    if type(originalAdd) ~= "function" or type(originalRemove) ~= "function" then return end
+
+    windowClass.addToUIManager = function(self, ...)
+        local result = originalAdd(self, ...)
+        activeCursorWindows[self] = className
+        if updateCursorRequest then updateCursorRequest() end
+        return result
+    end
+    windowClass.removeFromUIManager = function(self, ...)
+        local result = originalRemove(self, ...)
+        activeCursorWindows[self] = nil
+        if updateCursorRequest then updateCursorRequest() end
+        return result
+    end
+    windowClass._viewpointSupportCursorHooks = true
+end
+
+local function installCursorWindowHooks()
+    for _, className in ipairs(CURSOR_WINDOW_CLASS_NAMES) do
+        installCursorWindowHook(className)
+    end
 end
 
 local function installVanillaInventoryCursorIntegration()
@@ -189,6 +222,7 @@ local function installVanillaInventoryCursorIntegration()
         end
         if isPlayerInventory then
             updateInteractionMenuSuppression()
+            updateCursorRequest()
         end
         return result
     end
@@ -201,6 +235,7 @@ local function installVanillaInventoryCursorIntegration()
         local toggleWrapper = function(self, ...)
             local result = originalOnToggleVisible(self, ...)
             updateInteractionMenuSuppression()
+            updateCursorRequest()
             return result
         end
         inventoryClass.onToggleVisible = toggleWrapper
@@ -222,6 +257,7 @@ local function installErgonomicUIIntegration()
             local visible = self:isVisible() and self:isBodyVisible()
             self._viewpointSupportCursorRequested = visible
             updateInteractionMenuSuppression()
+            updateCursorRequest()
             return result
         end
     end
@@ -232,6 +268,7 @@ local function installErgonomicUIIntegration()
             local result = originalReveal(self, ...)
             self._viewpointSupportCursorRequested = true
             updateInteractionMenuSuppression()
+            updateCursorRequest()
             return result
         end
     end
@@ -241,6 +278,7 @@ local function installErgonomicUIIntegration()
         ErgUIPanel.openSettings = function(self, ...)
             local result = originalSettings(self, ...)
             self._viewpointSupportCursorRequested = true
+            updateCursorRequest()
             return result
         end
     end
@@ -257,7 +295,7 @@ local function ergonomicUiRequestsCursor()
     return panel._viewpointSupportCursorRequested == true
 end
 
-local function updateCursorRequest()
+updateCursorRequest = function()
     if not Support or not Support.setAutoCursorRequested then return end
     if not optionValue(options.autoUi, true) then
         Support.setAutoCursorRequested(false)
@@ -1055,6 +1093,7 @@ end
 local tickCounter = 0
 Events.OnTick.Add(function()
     tickCounter = tickCounter + 1
+    installCursorWindowHooks()
     if pendingInteractionTarget then
         pendingInteractionTicks = pendingInteractionTicks + 1
         if pendingInteractionTicks > 180 then
@@ -1084,6 +1123,7 @@ end)
 
 Events.OnGameStart.Add(function()
     syncConfiguration()
+    installCursorWindowHooks()
     installVanillaInventoryCursorIntegration()
     installErgonomicUIIntegration()
     installContextMenuIconsIntegration()

@@ -1345,7 +1345,8 @@ public final class Bridge {
         boolean vehicleCamera = isThirdPersonVehicle();
         boolean freeCursor = isFreeCursor() && !vehicleCamera;
         boolean mouseCaptured = readSystemCursorMode() == GLFW_CURSOR_DISABLED;
-        boolean visible = !vehicleCamera && (freeCursor || (!mouseCaptured && original));
+        boolean visible = autoCursorRequested
+                || (!vehicleCamera && (freeCursor || (!mouseCaptured && original)));
         if (debugLogging) {
             if (visible) {
                 mouseCursorVisibleCalls++;

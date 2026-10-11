@@ -187,6 +187,12 @@ public final class BridgeTest {
         check(Bridge.shouldSkipCursorRender(), "third-person vehicle mode must hide the direct cursor renderer");
         check(Bridge.shouldSkipMouseCursorTexture(), "vehicle camera must hide custom cursor texture");
         check(!Bridge.overrideMouseCursorVisibility(true), "vehicle camera must hide mouse cursor icons");
+        Bridge.setAutoCursorRequested(true);
+        check(Bridge.overrideMouseCursorVisibility(false),
+                "automatic UI cursor request must show the mouse in the vehicle camera");
+        Bridge.setAutoCursorRequested(false);
+        check(!Bridge.overrideMouseCursorVisibility(true),
+                "vehicle camera must hide mouse again when the UI closes");
         check(Bridge.shouldSkipVanillaReticle(false), "vehicle camera must hide vanilla reticle");
         GameKeyboard.down.add(56);
         Bridge.applyCursorOverride();
