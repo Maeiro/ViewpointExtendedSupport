@@ -20,6 +20,13 @@ public final class LootRows {
         rows.add(row);
     }
 
+    public void addItem(String value, Object item) {
+        Row row = new Row();
+        row.name = value;
+        row.items.add(item);
+        rows.add(row);
+    }
+
     public List<Row> rows() {
         return rows;
     }
@@ -30,6 +37,7 @@ public final class LootRows {
         private int action = -1;
         private boolean enabled = true;
         private Object icon;
+        private final ArrayList<Object> items = new ArrayList<>();
 
         public String heading() {
             return heading;

@@ -3,6 +3,7 @@ package maeiro.viewpointextendedsupport;
 import java.lang.reflect.Constructor;
 import java.lang.reflect.Field;
 import java.util.ArrayList;
+import me.zed_0xff.zombie_buddy.Patch;
 
 public final class ViewpointGroupingCompatibilityTest {
     @SuppressWarnings("unchecked")
@@ -18,6 +19,11 @@ public final class ViewpointGroupingCompatibilityTest {
         interactionActions.getDeclaredMethod("run", playerClass, int.class);
         rowsClass.getDeclaredMethod("clear");
         rowsClass.getDeclaredMethod("build", playerClass, targetClass);
+        Patch hook = Patches.ViewpointInteractionGroups.class.getAnnotation(Patch.class);
+        check(hook != null && "build".equals(hook.methodName()),
+                "container cascade should run after Viewpoint has assembled the full interaction menu");
+        check(Patches.ViewpointInteractionGroups.class.getDeclaredMethod("exit", Object.class, Object.class) != null,
+                "the grouping hook must receive the selected target");
         Constructor<?> rowsConstructor = rowsClass.getDeclaredConstructor();
         rowsConstructor.setAccessible(true);
         Object rowsObject = rowsConstructor.newInstance();
@@ -81,6 +87,79 @@ public final class ViewpointGroupingCompatibilityTest {
         check(rows.size() == 5, "clearing Viewpoint rows must restore the unmodified list");
         check("Wash: Yourself".equals(nameField.get(rows.get(2))), "restored menu must retain original labels");
 
+        Object containerRowsObject = rowsConstructor.newInstance();
+        ArrayList<Object> containerRows = (ArrayList<Object>) rowsField.get(containerRowsObject);
+        Field itemsField = rowClass.getDeclaredField("items");
+        itemsField.setAccessible(true);
+        Object gloveboxItem = new Object();
+        Object trunkItem = new Object();
+        addContainer(containerRows, rowConstructor, headingField, nameField, actionField, itemsField,
+                "Glovebox", "Pistol", gloveboxItem);
+        addContainer(containerRows, rowConstructor, headingField, nameField, actionField, itemsField,
+                "Trunk", "Water Bottle", trunkItem);
+        Object interactionHeading = rowConstructor.newInstance();
+        headingField.set(interactionHeading, "Interaction");
+        containerRows.add(interactionHeading);
+        containerRows.add(action(rowConstructor, nameField, actionField, "Open Door", 10));
+        Constructor<?> targetConstructor = targetClass.getDeclaredConstructor();
+        targetConstructor.setAccessible(true);
+        Object nonGroundTarget = targetConstructor.newInstance();
+        Field targetKindField = targetClass.getDeclaredField("kind");
+        targetKindField.setAccessible(true);
+        targetKindField.setInt(nonGroundTarget, 1);
+        Bridge.groupContextMenuActions(containerRowsObject, nonGroundTarget);
+
+        check(containerRows.size() == 4, "container contents should collapse into one root entry per container");
+        check("Glovebox (1)  >".equals(nameField.get(containerRows.get(0))),
+                "the container submenu should show its name and item count");
+        check("Trunk (1)  >".equals(nameField.get(containerRows.get(1))),
+                "multiple containers should remain separate root entries");
+        check("Interaction".equals(headingField.get(containerRows.get(2))),
+                "container entries should appear before the interaction actions section");
+        int gloveboxGroup = actionField.getInt(containerRows.get(0));
+        check(Bridge.handleGroupedContextAction(gloveboxGroup), "selecting a container should open its contents");
+        check(containerRows.size() == 2 && "< Back".equals(nameField.get(containerRows.get(0))),
+                "opening a container should hide unrelated interaction rows");
+        check("Pistol".equals(nameField.get(containerRows.get(1))),
+                "opening a container should reveal its original item rows");
+        check(actionField.getInt(containerRows.get(1)) == -1
+                        && !((ArrayList<?>) itemsField.get(containerRows.get(1))).isEmpty(),
+                "container item rows must remain native loot rows selectable by Viewpoint");
+        Bridge.clearGroupedContextMenu(containerRowsObject);
+        check(containerRows.size() == 6 && "Glovebox".equals(headingField.get(containerRows.get(0)))
+                        && "Pistol".equals(nameField.get(containerRows.get(1)))
+                        && "Trunk".equals(headingField.get(containerRows.get(2)))
+                        && "Interaction".equals(headingField.get(containerRows.get(4))),
+                "closing the menu must restore the original order and all container rows");
+
+        Bridge.configureContainerContentsCascade(false);
+        Object flatRowsObject = rowsConstructor.newInstance();
+        ArrayList<Object> flatRows = (ArrayList<Object>) rowsField.get(flatRowsObject);
+        addContainer(flatRows, rowConstructor, headingField, nameField, actionField, itemsField,
+                "Backpack", "Bandage", new Object());
+        flatRows.add(action(rowConstructor, nameField, actionField, "Open Door", 11));
+        Bridge.groupContextMenuActions(flatRowsObject, nonGroundTarget);
+        check(flatRows.size() == 3 && "Backpack".equals(headingField.get(flatRows.get(0)))
+                        && "Bandage".equals(nameField.get(flatRows.get(1))),
+                "disabling container cascade should leave native container rows visible");
+        Bridge.configureContainerContentsCascade(true);
+
+        Bridge.configure(false, 56, true, false, true, false, 0);
+        Object independentRowsObject = rowsConstructor.newInstance();
+        ArrayList<Object> independentRows = (ArrayList<Object>) rowsField.get(independentRowsObject);
+        addContainer(independentRows, rowConstructor, headingField, nameField, actionField, itemsField,
+                "Satchel", "Matches", new Object());
+        Object actionHeading = rowConstructor.newInstance();
+        headingField.set(actionHeading, "Interaction");
+        independentRows.add(actionHeading);
+        independentRows.add(action(rowConstructor, nameField, actionField, "Drink: Water", 12));
+        Bridge.groupContextMenuActions(independentRowsObject, nonGroundTarget);
+        check("Satchel (1)  >".equals(nameField.get(independentRows.get(0)))
+                        && "Drink: Water".equals(nameField.get(independentRows.get(2))),
+                "container cascading should work independently of grouped action menus");
+        Bridge.clearGroupedContextMenu(independentRowsObject);
+        Bridge.configure(false, 56, true, false, true, true, 0);
+
         System.out.println("ViewpointGroupingCompatibilityTest: PASS");
     }
 
@@ -90,6 +169,19 @@ public final class ViewpointGroupingCompatibilityTest {
         name.set(row, label);
         index.setInt(row, action);
         return row;
+    }
+
+    @SuppressWarnings("unchecked")
+    private static void addContainer(ArrayList<Object> rows, Constructor<?> constructor,
+                                    Field heading, Field name, Field action, Field items,
+                                    String container, String itemName, Object item) throws Exception {
+        Object headingRow = constructor.newInstance();
+        heading.set(headingRow, container);
+        rows.add(headingRow);
+        Object itemRow = constructor.newInstance();
+        name.set(itemRow, itemName);
+        ((ArrayList<Object>) items.get(itemRow)).add(item);
+        rows.add(itemRow);
     }
 
     private static void check(boolean condition, String message) {

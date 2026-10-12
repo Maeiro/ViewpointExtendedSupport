@@ -32,9 +32,11 @@ if PZAPI and PZAPI.ModOptions then
     options.ergonomicUi = modOptions:addTickBox("ErgonomicUIIntegration", "Integrate with Ergonomic UI", true)
     options.vehicleCamera = modOptions:addTickBox("ThirdPersonInVehicles", "Use third person in vehicles", true)
     options.groupContextMenuActions = modOptions:addTickBox("GroupContextMenuActions", "Use cascading Viewpoint interaction menus", true)
+    options.cascadeContainerContents = modOptions:addTickBox("CascadeContainerContents", "Show container contents in a submenu", true)
     options.lazyInteractionOptions = modOptions:addTickBox("LazyInteractionOptions", "Show View options before building interaction menus", true)
     options.interactionPreviousKey = modOptions:addKeyBind("InteractionPreviousKey", "Previous nearby interaction target", DEFAULT_PREVIOUS_INTERACTION_KEY)
     options.interactionNextKey = modOptions:addKeyBind("InteractionNextKey", "Next nearby interaction target", DEFAULT_NEXT_INTERACTION_KEY)
+    options.interactionCycleScrollModifier = addModifierOption(modOptions, "InteractionCycleScrollModifier", "Cycle nearby targets with scroll modifier", 4)
     options.hideInteractionMenuWhenInventoryOpen = modOptions:addTickBox("HideInteractionMenuWhenInventoryOpen", "Hide Viewpoint interaction menu while inventory is open", true)
     options.closeExtractionTrackerOnLoad = modOptions:addTickBox("CloseExtractionTrackerOnLoad", "Start Wolf Extraction Quest tracker closed", true)
     options.skipSetup = modOptions:addTickBox("SkipSetupWizard", "Skip Viewpoint startup setup screen", false)
@@ -68,8 +70,12 @@ local function syncConfiguration()
     if Support.configureInteractionCycling then
         Support.configureInteractionCycling(
             optionValue(options.interactionPreviousKey, DEFAULT_PREVIOUS_INTERACTION_KEY),
-            optionValue(options.interactionNextKey, DEFAULT_NEXT_INTERACTION_KEY)
+            optionValue(options.interactionNextKey, DEFAULT_NEXT_INTERACTION_KEY),
+            modifierMask(options.interactionCycleScrollModifier, 4)
         )
+    end
+    if Support.configureContainerContentsCascade then
+        Support.configureContainerContentsCascade(optionValue(options.cascadeContainerContents, true))
     end
 end
 

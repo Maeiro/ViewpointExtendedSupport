@@ -132,11 +132,12 @@ public final class Patches {
         }
     }
 
-    @Patch(className = "viewpoint.interact.LootRows", methodName = "actions", warmUp = true)
+    @Patch(className = "viewpoint.interact.LootRows", methodName = "build", warmUp = true)
     public static class ViewpointInteractionGroups {
         @Patch.OnExit
-        public static void exit(@Patch.This(readOnly = true) Object rows) {
-            Bridge.groupContextMenuActions(rows);
+        public static void exit(@Patch.This(readOnly = true) Object rows,
+                                @Patch.Argument(1) Object target) {
+            Bridge.groupContextMenuActions(rows, target);
         }
     }
 

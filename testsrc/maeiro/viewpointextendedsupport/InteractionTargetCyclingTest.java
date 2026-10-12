@@ -6,6 +6,7 @@ import viewpoint.input.Look;
 import viewpoint.interact.LootTargets;
 import me.zed_0xff.zombie_buddy.Patch;
 import zombie.input.GameKeyboard;
+import zombie.input.Mouse;
 import zombie.iso.IsoGridSquare;
 import zombie.iso.IsoObject;
 
@@ -55,6 +56,27 @@ public final class InteractionTargetCyclingTest {
         check(Bridge.cycleInteractionTarget(first) == third,
                 "Left should wrap to the previous target");
         GameKeyboard.down.clear();
+
+        GameKeyboard.down.add(56);
+        Mouse.wheelDelta = 1;
+        check(Bridge.shouldSkipInteractionWheel(), "Alt plus mouse wheel should be reserved for target cycling");
+        check(Mouse.wheelDelta == 0, "reserved mouse wheel input should not scroll the interaction list");
+        check(Bridge.cycleInteractionTarget(first) == first,
+                "scrolling up with Alt should advance to the next nearby target");
+        GameKeyboard.down.remove(56);
+        Mouse.wheelDelta = 1;
+        check(!Bridge.shouldSkipInteractionWheel(), "scrolling without the configured modifier should remain native");
+        Mouse.wheelDelta = 0;
+
+        Bridge.configureInteractionCycling(203, 205, 1);
+        GameKeyboard.down.add(42);
+        Mouse.wheelDelta = -1;
+        check(Bridge.shouldSkipInteractionWheel(), "the scroll modifier should be configurable to Shift");
+        check(Bridge.cycleInteractionTarget(first) == third,
+                "scrolling down with Shift should cycle to the previous nearby target");
+        GameKeyboard.down.remove(42);
+        Bridge.configureInteractionCycling(203, 205, 4);
+
         Bridge.setInteractionMenuSuppressed(true);
         check(Bridge.cycleInteractionTarget(first) == first,
                 "cycling should not replace the target while the interaction menu is suppressed");

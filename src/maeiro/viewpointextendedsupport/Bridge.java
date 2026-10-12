@@ -47,6 +47,7 @@ public final class Bridge {
     private static volatile boolean autoCursorInUi = true;
     private static volatile boolean debugLogging;
     private static volatile boolean groupContextMenuActionsEnabled = true;
+    private static volatile boolean containerContentsCascadeEnabled = true;
     private static volatile boolean skipSetupWizard;
     private static volatile boolean autoCursorRequested;
     private static volatile boolean inventoryOpen;
@@ -95,6 +96,8 @@ public final class Bridge {
     private static volatile Method glfwGetInputMode;
     private static volatile Method gameMouseGetX;
     private static volatile Method gameMouseGetY;
+    private static volatile Method mouseGetWheelState;
+    private static volatile Field mouseWheelDelta;
     private static volatile Field viewpointFrames;
     private static volatile Field freeCameraActive;
     private static volatile Field freeCameraPlace;
@@ -111,8 +114,10 @@ public final class Bridge {
     private static volatile int selectedInteractionCount;
     private static volatile int previousInteractionKey = DEFAULT_PREVIOUS_INTERACTION_KEY;
     private static volatile int nextInteractionKey = DEFAULT_NEXT_INTERACTION_KEY;
+    private static volatile int interactionScrollModifiers = MODIFIER_ALT;
     private static volatile boolean previousInteractionKeyDown;
     private static volatile boolean nextInteractionKeyDown;
+    private static volatile int pendingInteractionWheelSteps;
     private static volatile float interactionCycleYaw;
     private static volatile float interactionCyclePitch;
     private static volatile boolean alifeAimTargetFailureLogged;
@@ -166,17 +171,7 @@ public final class Bridge {
             groupContextMenuActionsEnabled = groupActions;
             InteractionMenu menu = activeInteractionMenu;
             if (menu != null) {
-                if (groupActions) {
-                    groupContextMenuActions(menu.rowsObject);
-                } else {
-                    restoreInteractionMenu(menu);
-                    menu.grouped = false;
-                    if (applyFlatInteractionIcons(menu)) {
-                        activeInteractionMenu = menu;
-                    } else {
-                        activeInteractionMenu = null;
-                    }
-                }
+                groupContextMenuActions(menu.rowsObject, menu.target);
             }
         }
     }
@@ -212,18 +207,36 @@ public final class Bridge {
         }
     }
 
-    public static void configureInteractionCycling(int previousKey, int nextKey) {
+    public static void configureInteractionCycling(int previousKey, int nextKey, int scrollModifiers) {
         previousKey = Math.max(0, previousKey);
         nextKey = Math.max(0, nextKey);
-        if (previousInteractionKey == previousKey && nextInteractionKey == nextKey) return;
+        scrollModifiers &= MODIFIER_SHIFT | MODIFIER_CONTROL | MODIFIER_ALT;
+        if (previousInteractionKey == previousKey && nextInteractionKey == nextKey
+                && interactionScrollModifiers == scrollModifiers) return;
         previousInteractionKey = previousKey;
         nextInteractionKey = nextKey;
+        interactionScrollModifiers = scrollModifiers;
         previousInteractionKeyDown = false;
         nextInteractionKeyDown = false;
+        pendingInteractionWheelSteps = 0;
         clearInteractionTargetSelection();
         if (debugLogging) {
             System.out.println("[Viewpoint Extended Support] interaction cycling configured: previousKey="
-                    + previousKey + ", nextKey=" + nextKey);
+                    + previousKey + ", nextKey=" + nextKey
+                    + ", scrollModifiers=" + scrollModifiers);
+        }
+    }
+
+    public static void configureInteractionCycling(int previousKey, int nextKey) {
+        configureInteractionCycling(previousKey, nextKey, interactionScrollModifiers);
+    }
+
+    public static void configureContainerContentsCascade(boolean enabled) {
+        if (containerContentsCascadeEnabled == enabled) return;
+        containerContentsCascadeEnabled = enabled;
+        InteractionMenu menu = activeInteractionMenu;
+        if (menu != null) {
+            groupContextMenuActions(menu.rowsObject, menu.target);
         }
     }
 
@@ -250,6 +263,8 @@ public final class Bridge {
                     + ", aimedTarget=" + describeInteractionTarget(aimedTarget));
         }
 
+        int wheelSteps = pendingInteractionWheelSteps;
+        pendingInteractionWheelSteps = 0;
         boolean keyPressed = previousPressed || nextPressed;
         if (debugLogging && keyPressed) {
             System.out.println("[Viewpoint Extended Support] interaction cycling key detected: key="
@@ -261,6 +276,7 @@ public final class Bridge {
         }
 
         if (!isViewEnabled() || interactionMenuSuppressed || autoCursorRequested || isFreeCursor()) {
+            pendingInteractionWheelSteps = 0;
             if (debugLogging && keyPressed) {
                 System.out.println("[Viewpoint Extended Support] interaction cycling ignored: input is suppressed");
             }
@@ -314,13 +330,13 @@ public final class Bridge {
                 clearInteractionTargetSelection();
             }
 
-            if ((previousPressed ^ nextPressed) && candidates.size() > 1) {
+            int steps = (nextPressed ^ previousPressed ? (nextPressed ? 1 : -1) : 0) + wheelSteps;
+            if (steps != 0 && candidates.size() > 1) {
                 int current = selectedInteractionTarget == null
                         ? findInteractionTarget(candidates, aimedTarget, access)
                         : findInteractionTarget(candidates, selectedInteractionTarget, access);
-                int direction = nextPressed ? 1 : -1;
-                int selected = Math.floorMod((current < 0 ? (direction > 0 ? -1 : 0) : current)
-                        + direction, candidates.size());
+                int selected = Math.floorMod((current < 0 ? (steps > 0 ? -1 : 0) : current)
+                        + steps, candidates.size());
                 selectedInteractionTarget = access.copyTarget(candidates.get(selected));
                 interactionCycleYaw = readLookAngle(access.lookYaw);
                 interactionCyclePitch = readLookAngle(access.lookPitch);
@@ -514,7 +530,33 @@ public final class Bridge {
     }
 
     public static boolean shouldSkipInteractionWheel() {
-        return inventoryOpen;
+        if (inventoryOpen) return true;
+        if (!isViewEnabled() || autoCursorRequested || isFreeCursor()) return false;
+
+        try {
+            Method wheelMethod = mouseGetWheelState;
+            if (wheelMethod == null) {
+                wheelMethod = method("zombie.input.Mouse", "getWheelState");
+                mouseGetWheelState = wheelMethod;
+            }
+            if (wheelMethod == null) return false;
+            int wheel = ((Number) wheelMethod.invoke(null)).intValue();
+            if (wheel == 0 || !modifiersMatch(0, interactionScrollModifiers)) return false;
+
+            Field wheelField = mouseWheelDelta;
+            if (wheelField == null) {
+                wheelField = field("zombie.input.Mouse", "wheelDelta");
+                mouseWheelDelta = wheelField;
+            }
+            if (wheelField == null) return false;
+
+            pendingInteractionWheelSteps = Math.max(-5, Math.min(5,
+                    pendingInteractionWheelSteps + Integer.signum(wheel)));
+            wheelField.setInt(null, 0);
+            return true;
+        } catch (Throwable ignored) {
+            return false;
+        }
     }
 
     public static ArrayList<Float> projectCompanionDogTag(int playerNum, float x, float y, float z) {
@@ -780,6 +822,11 @@ public final class Bridge {
 
     @SuppressWarnings("unchecked")
     public static void groupContextMenuActions(Object rowsObject) {
+        groupContextMenuActions(rowsObject, null);
+    }
+
+    @SuppressWarnings("unchecked")
+    public static void groupContextMenuActions(Object rowsObject, Object target) {
         if (rowsObject == null) {
             return;
         }
@@ -844,17 +891,21 @@ public final class Bridge {
                 return;
             }
 
+            Field headingField = field(rowClass.getName(), "heading");
+            Field itemsField = field(rowClass.getName(), "items");
+            if (headingField == null || itemsField == null) return;
+
             int firstAction = rows.size();
             while (firstAction > 0 && actionField.getInt(rows.get(firstAction - 1)) >= 0) {
                 firstAction--;
             }
-            if (firstAction == rows.size()) {
-                return;
-            }
 
-            menu = new InteractionMenu(rowsObject, rows, selectedField,
+            menu = new InteractionMenu(rowsObject, rows, target, selectedField,
                     nameField, actionField, enabledField, rowFactory);
             menu.prefixRows.addAll(rows.subList(0, firstAction));
+            menu.rowItemsField = itemsField;
+            boolean hasContainerGroups = groupContainerContents(menu, target, headingField, itemsField);
+            menu.hasContainerGroups = hasContainerGroups;
             for (int index = firstAction; index < rows.size(); index++) {
                 Object row = rows.get(index);
                 String name = (String) nameField.get(row);
@@ -864,7 +915,8 @@ public final class Bridge {
             }
 
             menu.iconField = iconField;
-            menu.grouped = groupContextMenuActionsEnabled && containsGroup(menu.rootEntries);
+            menu.grouped = hasContainerGroups
+                    || groupContextMenuActionsEnabled && containsGroup(menu.rootEntries);
             if (menu.grouped) {
                 assignGroupActions(menu, menu.rootEntries);
             }
@@ -893,7 +945,7 @@ public final class Bridge {
 
     public static boolean handleGroupedContextAction(int action) {
         InteractionMenu menu = activeInteractionMenu;
-        if (!groupContextMenuActionsEnabled || menu == null) {
+        if (menu == null) {
             return false;
         }
 
@@ -935,13 +987,72 @@ public final class Bridge {
     private static void addRootInteractionAction(InteractionMenu menu, InteractionAction action) {
         String label = action.originalName;
         int separator = label == null ? -1 : label.indexOf(": ");
-        if (separator < 0) {
+        if (!groupContextMenuActionsEnabled || separator < 0) {
             menu.rootEntries.add(InteractionEntry.action(label, action));
             return;
         }
 
         String groupName = label.substring(0, separator);
         findOrCreateGroup(menu.rootEntries, groupName, groupName).candidateActions.add(action);
+    }
+
+    @SuppressWarnings("unchecked")
+    private static boolean groupContainerContents(InteractionMenu menu, Object target,
+                                                  Field headingField, Field itemsField) throws Exception {
+        if (!containerContentsCascadeEnabled || target == null) return false;
+
+        Class<?> targetClass = Class.forName("viewpoint.interact.LootTargets$Target");
+        Field kindField = requiredField(targetClass, "kind");
+        if (kindField.getInt(target) == requiredField(
+                Class.forName("viewpoint.interact.LootTargets"), "GROUND").getInt(null)) return false;
+
+        ArrayList<Object> originalPrefix = new ArrayList<>(menu.prefixRows);
+        ArrayList<Object> visiblePrefix = new ArrayList<>();
+        int containerIndex = 0;
+        for (int index = 0; index < originalPrefix.size();) {
+            Object headingRow = originalPrefix.get(index);
+            Object headingValue = headingField.get(headingRow);
+            if (!(headingValue instanceof String heading) || heading.isEmpty()) {
+                visiblePrefix.add(headingRow);
+                index++;
+                continue;
+            }
+
+            int end = index + 1;
+            ArrayList<Object> itemRows = new ArrayList<>();
+            while (end < originalPrefix.size() && headingField.get(originalPrefix.get(end)) == null) {
+                Object row = originalPrefix.get(end);
+                Object rowItems = itemsField.get(row);
+                if (rowItems instanceof java.util.List<?> items && !items.isEmpty()) itemRows.add(row);
+                end++;
+            }
+            if (itemRows.isEmpty()) {
+                visiblePrefix.addAll(originalPrefix.subList(index, end));
+                index = end;
+                continue;
+            }
+
+            ArrayList<Object> containerItems = new ArrayList<>();
+            for (Object row : itemRows) {
+                Object rowItems = itemsField.get(row);
+                if (rowItems instanceof java.util.List<?> items) containerItems.addAll(items);
+            }
+            String groupName = heading + " (" + containerItems.size() + ")";
+            InteractionEntry container = InteractionEntry.container(
+                    groupName, "container:" + containerIndex++);
+            container.containerItems.addAll(containerItems);
+            for (Object row : itemRows) {
+                InteractionAction item = new InteractionAction(row, (String) menu.nameField.get(row));
+                menu.actionRows.add(item);
+                container.candidateActions.add(item);
+            }
+            menu.rootEntries.add(container);
+            index = end;
+        }
+
+        menu.prefixRows.clear();
+        menu.prefixRows.addAll(visiblePrefix);
+        return containerIndex > 0;
     }
 
     private static InteractionEntry findOrCreateGroup(ArrayList<InteractionEntry> entries,
@@ -958,6 +1069,14 @@ public final class Bridge {
 
     private static void populateGroupChildren(InteractionMenu menu, InteractionEntry parent) {
         if (parent.childrenLoaded) {
+            return;
+        }
+
+        if (parent.containerContents) {
+            for (InteractionAction action : parent.candidateActions) {
+                parent.children.add(InteractionEntry.action(action.originalName, action));
+            }
+            parent.childrenLoaded = true;
             return;
         }
 
@@ -1001,9 +1120,13 @@ public final class Bridge {
 
     private static void showInteractionLevel(InteractionMenu menu, boolean selectFirst) throws Exception {
         menu.rows.clear();
-        menu.rows.addAll(menu.prefixRows);
         ArrayList<InteractionEntry> visibleEntries = menu.path.isEmpty()
                 ? menu.rootEntries : menu.path.get(menu.path.size() - 1).children;
+        boolean showingContainerContents = !menu.path.isEmpty()
+                && menu.path.get(menu.path.size() - 1).containerContents;
+        boolean containersFirst = menu.path.isEmpty() && menu.hasContainerGroups;
+        boolean prefixAdded = !containersFirst;
+        if (!showingContainerContents && prefixAdded) menu.rows.addAll(menu.prefixRows);
         if (!menu.path.isEmpty()) {
             InteractionEntry parent = menu.path.get(menu.path.size() - 1);
             populateGroupChildren(menu, parent);
@@ -1018,9 +1141,19 @@ public final class Bridge {
             menu.rows.add(createInteractionRow(menu, "< Back", GROUP_BACK_ACTION, null));
         }
         for (InteractionEntry entry : visibleEntries) {
+            if (containersFirst && !prefixAdded && !entry.containerContents) {
+                menu.rows.addAll(menu.prefixRows);
+                prefixAdded = true;
+            }
             Object row = entry.group
                     ? createInteractionRow(menu, entry.name + "  >", entry.action, entry.icon)
                     : entry.interactionAction.row;
+            if (entry.group && entry.containerContents && menu.rowItemsField != null) {
+                Object rowItems = menu.rowItemsField.get(row);
+                if (rowItems instanceof java.util.List<?> items) {
+                    ((java.util.List<Object>) items).addAll(entry.containerItems);
+                }
+            }
             menu.rows.add(row);
             if (!entry.group && (entry.name == null
                     ? entry.interactionAction.originalName != null
@@ -1031,6 +1164,7 @@ public final class Bridge {
                 firstSelectable = menu.rows.size() - 1;
             }
         }
+        if (containersFirst && !prefixAdded) menu.rows.addAll(menu.prefixRows);
         if (selectFirst) {
             if (firstSelectable < 0) {
                 firstSelectable = backIndex;
@@ -1042,7 +1176,8 @@ public final class Bridge {
     }
 
     private static boolean isInteractionRowSelectable(InteractionMenu menu, Object row) throws IllegalAccessException {
-        return menu.actionField.getInt(row) >= 0 && menu.enabledField.getBoolean(row);
+        return menu.enabledField.getBoolean(row)
+                && (menu.actionField.getInt(row) >= 0 || menu.rowHasItems(row));
     }
 
     private static Object createInteractionRow(InteractionMenu menu, String name, int action, Object icon) throws Exception {
@@ -1063,10 +1198,7 @@ public final class Bridge {
                 }
             }
             menu.rows.clear();
-            menu.rows.addAll(menu.prefixRows);
-            for (InteractionAction action : menu.actionRows) {
-                menu.rows.add(action.row);
-            }
+            menu.rows.addAll(menu.originalRows);
             menu.path.clear();
             menu.parentSelections.clear();
             if (!menu.rows.isEmpty()) {
@@ -1326,30 +1458,42 @@ public final class Bridge {
     private static final class InteractionMenu {
         private final Object rowsObject;
         private final ArrayList<Object> rows;
+        private final ArrayList<Object> originalRows;
         private final ArrayList<Object> prefixRows = new ArrayList<>();
         private final ArrayList<InteractionAction> actionRows = new ArrayList<>();
         private final ArrayList<InteractionEntry> rootEntries = new ArrayList<>();
         private final LinkedHashMap<Integer, InteractionEntry> groupsByAction = new LinkedHashMap<>();
         private final ArrayList<InteractionEntry> path = new ArrayList<>();
         private final ArrayList<Integer> parentSelections = new ArrayList<>();
+        private final Object target;
         private final Field selectedField;
         private final Field nameField;
         private final Field actionField;
         private Field iconField;
+        private Field rowItemsField;
         private final Field enabledField;
         private final Constructor<?> rowFactory;
+        private boolean hasContainerGroups;
         private boolean grouped;
 
-        private InteractionMenu(Object rowsObject, ArrayList<Object> rows,
+        private InteractionMenu(Object rowsObject, ArrayList<Object> rows, Object target,
                                 Field selectedField, Field nameField, Field actionField,
                                 Field enabledField, Constructor<?> rowFactory) {
             this.rowsObject = rowsObject;
             this.rows = rows;
+            this.originalRows = new ArrayList<>(rows);
+            this.target = target;
             this.selectedField = selectedField;
             this.nameField = nameField;
             this.actionField = actionField;
             this.enabledField = enabledField;
             this.rowFactory = rowFactory;
+        }
+
+        private boolean rowHasItems(Object row) throws IllegalAccessException {
+            if (rowItemsField == null) return false;
+            Object items = rowItemsField.get(row);
+            return items instanceof java.util.List<?> list && !list.isEmpty();
         }
     }
 
@@ -1360,19 +1504,31 @@ public final class Bridge {
         private final String path;
         private final ArrayList<InteractionEntry> children = new ArrayList<>();
         private final ArrayList<InteractionAction> candidateActions = new ArrayList<>();
+        private final ArrayList<Object> containerItems = new ArrayList<>();
+        private final boolean containerContents;
         private boolean childrenLoaded;
         private Object icon;
         private int action;
 
         private InteractionEntry(String name, boolean group, InteractionAction interactionAction, String path) {
+            this(name, group, interactionAction, path, false);
+        }
+
+        private InteractionEntry(String name, boolean group, InteractionAction interactionAction,
+                                 String path, boolean containerContents) {
             this.name = name;
             this.group = group;
             this.interactionAction = interactionAction;
             this.path = path;
+            this.containerContents = containerContents;
         }
 
         private static InteractionEntry group(String name, String path) {
             return new InteractionEntry(name, true, null, path);
+        }
+
+        private static InteractionEntry container(String name, String path) {
+            return new InteractionEntry(name, true, null, path, true);
         }
 
         private static InteractionEntry action(String name, InteractionAction action) {

@@ -2,6 +2,7 @@ package zombie.input;
 
 public final class Mouse {
     public static int wheelState;
+    public static int wheelDelta;
     public static int absoluteX;
     public static int absoluteY;
 
@@ -9,7 +10,7 @@ public final class Mouse {
     }
 
     public static int getWheelState() {
-        return wheelState;
+        return wheelDelta;
     }
 
     public static int getXA() {
