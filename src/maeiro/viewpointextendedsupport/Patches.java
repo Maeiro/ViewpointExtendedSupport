@@ -6,39 +6,11 @@ public final class Patches {
     private Patches() {
     }
 
-    @Patch(className = "viewpoint.FP", methodName = "toggle", warmUp = true)
-    public static class FirstPersonToggle {
+    @Patch(className = "viewpoint.interact.LootMenu", methodName = "mouse", warmUp = true)
+    public static class InventoryWheel {
         @Patch.OnEnter(skipOn = true)
         public static boolean enter() {
-            return Bridge.interceptFirstPersonToggle();
-        }
-    }
-
-    @Patch(className = "viewpoint.input.ThirdPerson", methodName = "poll", warmUp = true)
-    public static class ThirdPersonPoll {
-        @Patch.OnEnter(skipOn = true)
-        public static boolean enter() {
-            return Bridge.interceptThirdPersonPoll();
-        }
-    }
-
-    @Patch(className = "viewpoint.input.ThirdPerson", methodName = "boom", warmUp = true)
-    public static class ThirdPersonBoom {
-        @Patch.OnExit
-        public static void exit(@Patch.Return(readOnly = false) float result) {
-            result = Bridge.adjustThirdPersonBoom(result);
-        }
-    }
-
-    @Patch(className = "viewpoint.interact.LootMenu", methodName = "wheel", warmUp = true)
-    public static class LootWheel {
-        @Patch.OnEnter(skipOn = true)
-        public static boolean enter() {
-            if (Bridge.shouldSkipInteractionWheel()) {
-                return true;
-            }
-            Bridge.captureMouseWheel();
-            return false;
+            return Bridge.shouldSkipInteractionWheel();
         }
     }
 
@@ -47,6 +19,15 @@ public final class Patches {
         @Patch.OnExit
         public static void exit() {
             Bridge.applyCursorOverride();
+            Bridge.prepareCursorCaptureRequest();
+        }
+    }
+
+    @Patch(className = "viewpoint.FP", methodName = "viewInput", warmUp = true)
+    public static class CursorCaptureRequest {
+        @Patch.OnExit(onThrowable = Throwable.class)
+        public static void exit() {
+            Bridge.finishCursorCaptureRequest();
         }
     }
 
@@ -143,6 +124,14 @@ public final class Patches {
         }
     }
 
+    @Patch(className = "viewpoint.Hooks", methodName = "mouseUpdated", warmUp = true)
+    public static class UiMousePosition {
+        @Patch.OnExit
+        public static void exit() {
+            Bridge.synchronizeUiMousePosition();
+        }
+    }
+
     @Patch(className = "viewpoint.interact.LootRows", methodName = "actions", warmUp = true)
     public static class ViewpointInteractionGroups {
         @Patch.OnExit
@@ -157,6 +146,14 @@ public final class Patches {
         public static void exit(@Patch.Argument(0) Object player,
                                 @Patch.Argument(1) Object square) {
             Bridge.addALifeInteractionTargets(player, square);
+        }
+    }
+
+    @Patch(className = "viewpoint.interact.LootTargets", methodName = "aimed", warmUp = true)
+    public static class InteractionTargetCycling {
+        @Patch.OnExit
+        public static void exit(@Patch.Return(readOnly = false) viewpoint.interact.LootTargets.Target target) {
+            target = (viewpoint.interact.LootTargets.Target) Bridge.cycleInteractionTarget(target);
         }
     }
 

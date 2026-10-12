@@ -3,7 +3,7 @@ package viewpoint;
 import viewpoint.core.Frame;
 
 public final class FP {
-    private static boolean cursorMode;
+    public static boolean cursorMode;
     private static final Frame[] frames = { new Frame() };
     public static int resetCount;
 

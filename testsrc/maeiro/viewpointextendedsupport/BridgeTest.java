@@ -6,15 +6,23 @@ import viewpoint.core.View;
 import viewpoint.input.Look;
 import viewpoint.input.ThirdPerson;
 import viewpoint.interact.InteractActions;
+import me.zed_0xff.zombie_buddy.Patch;
 import zombie.input.GameKeyboard;
-import zombie.input.Mouse;
 import org.lwjgl.glfw.GLFW;
 import zombie.iso.IsoCamera;
 import viewpoint.interact.LootRows;
 
 public final class BridgeTest {
     public static void main(String[] args) {
-        Bridge.configure(70, 71, false, true, 56, true, 72, true);
+        check(!Bridge.shouldSkipSetupWizard(), "setup wizard is shown by default");
+        Patch inventoryWheelPatch = Patches.InventoryWheel.class.getAnnotation(Patch.class);
+        check(inventoryWheelPatch != null && "mouse".equals(inventoryWheelPatch.methodName()),
+                "inventory scroll protection must hook the current LootMenu mouse handler");
+        View.enabled = true;
+        ThirdPerson.active = true;
+        FP.cursorMode = false;
+
+        configure(true, 56, true, true, true, true, 0);
         check(!Bridge.shouldSkipInteractionMenu(), "Viewpoint interaction menu must remain visible when suppression is inactive");
         Bridge.setInteractionMenuSuppressed(true);
         check(Bridge.shouldSkipInteractionMenu(), "inventory suppression must hide the Viewpoint interaction menu");
@@ -24,7 +32,6 @@ public final class BridgeTest {
         check(!InteractActions.isGathered(), "deferred interaction request should permit gathering the focused target again");
         check(InteractActions.aimedAt() < System.nanoTime() - 100_000_000L,
                 "deferred interaction request should bypass the normal aim grace period");
-        check(Bridge.shouldSkipSetupWizard(), "setup wizard is skipped by default");
         Object contextMenuIcon = new Object();
         Object vanillaWashIcon = new Object();
         Object vanillaClothingIcon = new Object();
@@ -67,8 +74,7 @@ public final class BridgeTest {
         check(groupedActions.rows().get(2).icon() == contextMenuIcon,
                 "clearing captured vanilla icons should restore the CMI fallback");
 
-        Bridge.configure(70, 71, false, true, 56, true, 72, true,
-                true, true, 12, 13, false);
+        configure(true, 56, true, true, true, false, 0);
         check(groupedActions.rows().size() == 5
                         && "Wash: Yourself".equals(groupedActions.rows().get(2).name()),
                 "disabling cascading menus must restore Viewpoint's original action rows");
@@ -80,48 +86,17 @@ public final class BridgeTest {
         check(ungroupedActions.rows().size() == 1
                         && "Wash: Yourself".equals(ungroupedActions.rows().get(0).name()),
                 "disabling grouping must keep Viewpoint's original action list");
-        Bridge.configure(70, 71, false, true, 56, true, 72, true);
+        configure(true, 56, true, true, true, true, 0);
         Bridge.clearContextMenuIcons();
         Bridge.refreshContextMenuIcons();
         check(ungroupedActions.rows().get(0).icon() == null,
                 "changing the selected icon pack must remove stale menu icons");
 
-        GameKeyboard.pressed.add(70);
-        check(Bridge.interceptFirstPersonToggle(), "custom first-person binding must skip original");
-        check(View.enabled, "custom first-person binding must enable Viewpoint");
-        check(FP.resetCount == 1, "custom toggle must reset Viewpoint caches");
-        check(Compat.checks == 1, "custom toggle must run compatibility check");
-        check(Math.abs(Look.yaw - 1.25f) < 0.001f, "custom toggle must restore player yaw");
-
-        GameKeyboard.pressed.add(71);
-        check(Bridge.interceptThirdPersonPoll(), "custom third-person binding must skip original");
-        check(ThirdPerson.active, "custom third-person binding must activate third person");
-
-        GameKeyboard.pressed.add(72);
-        check(Bridge.interceptThirdPersonPoll(), "view mode binding must skip original");
-        check(!ThirdPerson.active, "view mode binding must switch to first person");
-        ThirdPerson.active = true;
-
-        Bridge.configure(70, 71, false, true, 1003, true, 44, true,
-                true, true, 12, 13, true, packModifiers(0, 1, 0, 0));
-        ThirdPerson.active = false;
-        GameKeyboard.pressed.add(44);
-        Bridge.interceptThirdPersonPoll();
-        check(!ThirdPerson.active, "composite view binding must not trigger without its modifier");
-        GameKeyboard.down.add(42);
-        GameKeyboard.pressed.add(44);
-        Bridge.interceptThirdPersonPoll();
-        check(ThirdPerson.active, "Shift+Z view binding must toggle third person");
-        check(!GameKeyboard.pressed.contains(44), "composite view binding must consume its key press");
-        GameKeyboard.down.remove(42);
-
         GameKeyboard.down.add(1003);
-        Bridge.configure(70, 71, false, true, 1003, true, 44, true,
-                true, true, 12, 13, true, packModifiers(0, 1, 0, 0));
+        configure(true, 1003, true, true, true, true, 0);
         Bridge.applyCursorOverride();
         check(Bridge.isFreeCursor(), "mouse button 4 must activate the default hold binding");
-        Bridge.configure(70, 71, false, true, 1003, true, 44, true,
-                true, true, 12, 13, true, packModifiers(1, 1, 0, 0));
+        configure(true, 1003, true, true, true, true, 1);
         Bridge.applyCursorOverride();
         check(!Bridge.isFreeCursor(), "modified mouse hold binding must wait for its modifier");
         GameKeyboard.down.add(42);
@@ -131,15 +106,35 @@ public final class BridgeTest {
         GameKeyboard.down.remove(1003);
         Bridge.applyCursorOverride();
         check(!Bridge.isFreeCursor(), "modified mouse hold binding must release when its chord is broken");
-        Bridge.configure(70, 71, false, true, 56, true, 72, true);
+        configure(true, 56, true, true, true, true, 0);
 
         GameKeyboard.down.add(56);
         Bridge.applyCursorOverride();
         check(Bridge.isFreeCursor(), "hold binding must activate free cursor");
         check(!FP.cursor(), "holding free cursor must not overwrite Viewpoint's native toggle state");
+        Bridge.setAutoCursorRequested(true);
+        GLFW.mode = 212993;
+        GLFW.cursorX = 723.0;
+        GLFW.cursorY = 412.0;
+        Look.captured = false;
+        Bridge.overrideLookMouseCursorUpdate(false);
+        Bridge.setAutoCursorRequested(false);
+        GLFW.cursorX = 1110.0;
+        GLFW.cursorY = 700.0;
+        Bridge.overrideLookMouseCursorUpdate(false);
         Look.wantCapture = true;
+        Look.captured = true;
+        GLFW.mode = 212995;
         Bridge.prepareMouseCursorUpdate();
         check(!Look.wantCapture, "held free cursor must release Viewpoint mouse capture");
+        GLFW.cursorX = 960.0;
+        GLFW.cursorY = 540.0;
+        GLFW.mode = 212993;
+        Look.captured = false;
+        check(!Bridge.overrideLookMouseCursorUpdate(false),
+                "releasing mouse capture must preserve Viewpoint's free cursor state");
+        check(GLFW.cursorX == 960.0 && GLFW.cursorY == 540.0,
+                "releasing mouse capture must preserve Viewpoint's centering instead of restoring an old position");
         FP.toggleCursorMode();
         Bridge.applyCursorOverride();
         check(FP.cursor(), "Viewpoint's middle-button toggle must remain usable while the hold key is down");
@@ -205,112 +200,44 @@ public final class BridgeTest {
         Bridge.applyCursorOverride();
         check(!Bridge.overrideMouseCursorUpdate(false), "leaving vehicle camera must allow normal update");
 
-        Bridge.configure(70, 71, false, false, 56, true, 72, true);
+        configure(false, 56, true, true, true, true, 0);
         Bridge.setAutoCursorRequested(true);
         Bridge.applyCursorOverride();
         check(Bridge.isFreeCursor(), "UI option must enable the free cursor by default");
         Bridge.setAutoCursorRequested(false);
-        Bridge.configure(70, 71, false, false, 56, false, 72, true);
+        configure(false, 56, false, true, true, true, 0);
         Bridge.applyCursorOverride();
         check(!Bridge.isFreeCursor(), "disabling automatic UI cursor must release the free cursor");
-        Bridge.configure(70, 71, false, true, 56, true, 72, true);
-
-        Mouse.wheelState = 1;
-        Bridge.captureMouseWheel();
-        Mouse.wheelState = 0;
-        Bridge.pollThirdPersonZoom();
-        check(Bridge.adjustThirdPersonBoom(5.0f) < 5.0f,
-                "mouse wheel up must move the third-person camera closer");
-        Mouse.wheelState = -2;
-        Bridge.captureMouseWheel();
-        Mouse.wheelState = 0;
-        Bridge.pollThirdPersonZoom();
-        check(Bridge.adjustThirdPersonBoom(5.0f) > 5.0f,
-                "mouse wheel down must move the third-person camera farther away");
-        Mouse.wheelState = 0;
+        configure(true, 56, true, true, true, true, 0);
 
         Bridge.setInventoryOpen(true);
         Bridge.setInteractionMenuSuppressed(true);
-        Mouse.wheelState = 2;
-        float zoomBeforeInventoryScroll = Bridge.adjustThirdPersonBoom(5.0f);
-        check(Patches.LootWheel.enter(), "the wheel hook must skip Viewpoint's hidden menu handler");
-        Bridge.pollThirdPersonZoom();
-        check(Bridge.shouldSkipInteractionWheel(), "hidden interaction menu must stop handling inventory scroll");
-        check(Mouse.wheelState == 2, "inventory scrolling must not be consumed by the Viewpoint menu");
-        check(Bridge.adjustThirdPersonBoom(5.0f) == zoomBeforeInventoryScroll,
-                "inventory scrolling must not zoom the third-person camera");
+        check(Patches.InventoryWheel.enter(), "the wheel hook must skip Viewpoint's hidden menu handler");
+        check(Bridge.shouldSkipInteractionWheel(), "an open inventory must reserve the wheel from Viewpoint");
         Bridge.setInteractionMenuSuppressed(false);
         check(Bridge.shouldSkipInteractionWheel(),
                 "an open inventory must reserve the mouse wheel even when menu hiding is disabled");
-        check(Patches.LootWheel.enter(), "inventory mode must bypass Viewpoint wheel handling");
+        check(Patches.InventoryWheel.enter(), "inventory mode must bypass Viewpoint wheel handling");
         Bridge.setInventoryOpen(false);
         check(!Bridge.shouldSkipInteractionWheel(), "closing inventory must restore Viewpoint wheel handling");
-        Mouse.wheelState = 0;
+        check(!Patches.InventoryWheel.enter(), "closing inventory must restore Viewpoint wheel handling");
 
-        float zoomBeforeKeys = Bridge.adjustThirdPersonBoom(5.0f);
-        GameKeyboard.pressed.add(12);
-        Bridge.pollThirdPersonZoom();
-        check(Bridge.adjustThirdPersonBoom(5.0f) > zoomBeforeKeys,
-                "minus default binding must zoom the third-person camera out");
-        GameKeyboard.pressed.add(13);
-        Bridge.pollThirdPersonZoom();
-        check(Bridge.adjustThirdPersonBoom(5.0f) == zoomBeforeKeys,
-                "equals default binding must zoom the third-person camera in");
-
-        Bridge.configure(70, 71, false, true, 56, true, 72, true,
-                false, true, 80, 81);
-        float zoomBeforeCustomKey = Bridge.adjustThirdPersonBoom(5.0f);
-        GameKeyboard.pressed.add(80);
-        Bridge.pollThirdPersonZoom();
-        check(Bridge.adjustThirdPersonBoom(5.0f) > zoomBeforeCustomKey,
-                "configured zoom binding must work even when mouse-wheel zoom is disabled");
-        GameKeyboard.pressed.add(81);
-        Bridge.pollThirdPersonZoom();
-        check(Bridge.adjustThirdPersonBoom(5.0f) == zoomBeforeCustomKey,
-                "configured zoom-in binding must reverse zoom-out");
-
-        Bridge.configure(70, 71, false, true, 56, true, 72, true,
-                false, true, 80, 81, true, packModifiers(0, 0, 6, 0));
-        float zoomBeforeCompositeKey = Bridge.adjustThirdPersonBoom(5.0f);
-        GameKeyboard.pressed.add(80);
-        Bridge.pollThirdPersonZoom();
-        check(Bridge.adjustThirdPersonBoom(5.0f) == zoomBeforeCompositeKey,
-                "composite zoom binding must not trigger without its modifiers");
-        GameKeyboard.down.add(29);
-        GameKeyboard.down.add(56);
-        GameKeyboard.pressed.add(80);
-        Bridge.pollThirdPersonZoom();
-        check(Bridge.adjustThirdPersonBoom(5.0f) > zoomBeforeCompositeKey,
-                "Ctrl+Alt zoom binding must trigger with both modifiers");
-        GameKeyboard.down.remove(29);
-        GameKeyboard.down.remove(56);
-
-        float zoomBeforeFreeCursor = Bridge.adjustThirdPersonBoom(5.0f);
-        GameKeyboard.down.add(56);
-        Bridge.applyCursorOverride();
-        Mouse.wheelState = 1;
-        Bridge.captureMouseWheel();
-        Mouse.wheelState = 0;
-        Bridge.pollThirdPersonZoom();
-        check(Bridge.adjustThirdPersonBoom(5.0f) == zoomBeforeFreeCursor,
-                "free cursor must not consume third-person camera zoom");
-        GameKeyboard.down.remove(56);
-        Bridge.applyCursorOverride();
-
-        Bridge.configure(70, 71, false, true, 56, true, 72, true, true, false);
+        configure(true, 56, true, true, false, true, 0);
         check(!Bridge.shouldSkipSetupWizard(), "setup screen option can keep the wizard enabled");
-        Bridge.configure(70, 71, false, true, 56, true, 72, true, true, true);
+        configure(true, 56, true, true, true, true, 0);
         check(Bridge.shouldSkipSetupWizard(), "setup screen option can skip the wizard");
 
         View.enabled = false;
+        int initialResetCount = FP.resetCount;
+        int initialCompatChecks = Compat.checks;
         check(Bridge.enableViewpoint(), "startup option must enable Viewpoint");
         check(View.enabled, "startup option must leave Viewpoint enabled");
+        check(FP.resetCount == initialResetCount + 1, "enabling Viewpoint must reset its caches");
+        check(Compat.checks == initialCompatChecks + 1, "enabling Viewpoint must run compatibility checks");
         int resetCount = FP.resetCount;
         check(Bridge.enableViewpoint(), "startup option must succeed when Viewpoint is already enabled");
         check(FP.resetCount == resetCount, "startup option must not toggle or reset an already-enabled view");
         View.enabled = false;
-        check(Bridge.adjustThirdPersonBoom(5.0f) == 5.0f,
-                "disabled Viewpoint mode must preserve the original camera distance");
         check(Bridge.overrideMouseCursorVisibility(true), "vanilla cursor visibility must be preserved outside Viewpoint");
         ALifeInteractionTargetsTest.run();
 
@@ -321,7 +248,10 @@ public final class BridgeTest {
         if (!condition) throw new AssertionError(message);
     }
 
-    private static int packModifiers(int cursor, int viewMode, int zoomOut, int zoomIn) {
-        return cursor | viewMode << 3 | zoomOut << 6 | zoomIn << 9;
+    private static void configure(boolean holdCursor, int cursorKey, boolean autoUi,
+                                  boolean debug, boolean skipWizard, boolean groupActions,
+                                  int cursorModifiers) {
+        Bridge.configure(holdCursor, cursorKey, autoUi, debug, skipWizard,
+                groupActions, cursorModifiers);
     }
 }

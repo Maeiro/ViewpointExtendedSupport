@@ -14,10 +14,10 @@ public final class CompanionDogTagProjectionTest {
         View.enabled = true;
         ArrayList<Float> position = Bridge.projectCompanionDogTag(0, 2.0f, 3.0f, 1.0f);
         check(position != null, "active Viewpoint should project a tag position");
-        check(Math.abs(position.get(0) - 964.5f) < 0.001f,
-                "tag projection should use Viewpoint's configured head height");
-        check(Math.abs(position.get(1) - 545.5f) < 0.001f,
-                "tag projection should return both screen coordinates");
+        check(Math.abs(position.get(0) - 963.0f) < 0.001f,
+                "tag projection should return the dog's projected horizontal position");
+        check(Math.abs(position.get(1) - 544.0f) < 0.001f,
+                "tag projection should return the dog's projected ground position");
 
         FreeCam.active = true;
         FreeCam.place = new FreeCam.Place();

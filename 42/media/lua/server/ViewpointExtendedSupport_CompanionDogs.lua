@@ -3,9 +3,11 @@ local function alifeRecord(zombie)
     if type(alife) ~= "table" then return nil end
 
     local ok, modData = pcall(function() return zombie:getModData() end)
-    if not ok or type(modData) ~= "table" then return nil end
-
-    local uid = modData.ProjectALifeUID
+    local uid = ok and type(modData) == "table" and modData.ProjectALifeUID or nil
+    if (uid == nil or uid == "") and type(zombie.getVariableString) == "function" then
+        local okVariable, value = pcall(zombie.getVariableString, zombie, "ALifeUID")
+        if okVariable then uid = value end
+    end
     if uid == nil or uid == "" then return nil end
     uid = tostring(uid)
 
@@ -34,7 +36,23 @@ local function isFriendlyOrAlliedAPlayer(zombie, player)
     end
 
     local ok, stance = pcall(relations.playerStance, record, player)
-    return ok and (stance == "friendly" or stance == "allied")
+    if not ok then return false end
+    stance = string.lower(tostring(stance or ""))
+    return stance == "friendly" or stance == "allied"
+end
+
+local function playerForDog(companionDogs, animal)
+    local okOwner, owner = pcall(companionDogs.getOwnerPlayer, animal)
+    if okOwner and owner then return owner end
+    if type(getPlayer) == "function" then
+        local okPlayer, player = pcall(getPlayer)
+        if okPlayer and player then return player end
+    end
+    if type(getSpecificPlayer) == "function" then
+        local okPlayer, player = pcall(getSpecificPlayer, 0)
+        if okPlayer then return player end
+    end
+    return nil
 end
 
 local function installCompanionDogsFilter()
@@ -51,8 +69,8 @@ local function installCompanionDogsFilter()
         local zombies = originalZsnap(animal, ...)
         if type(zombies) ~= "table" or #zombies == 0 then return zombies end
 
-        local okOwner, owner = pcall(companionDogs.getOwnerPlayer, animal)
-        if not okOwner or not owner then return zombies end
+        local owner = playerForDog(companionDogs, animal)
+        if not owner then return zombies end
 
         local filtered
         for index = 1, #zombies do
@@ -78,6 +96,20 @@ local function installCompanionDogsFilter()
 end
 
 installCompanionDogsFilter()
-if Events and Events.OnGameStart then
-    Events.OnGameStart.Add(installCompanionDogsFilter)
+if type(Events) == "table" then
+    if Events.OnGameStart then
+        Events.OnGameStart.Add(installCompanionDogsFilter)
+    end
+    if Events.OnTick then
+        local function retryCompanionDogsFilter()
+            installCompanionDogsFilter()
+            local companionDogs = CompanionDogs
+            if type(companionDogs) == "table"
+                    and companionDogs._viewpointSupportALifeZsnap == companionDogs.zsnap
+                    and Events.OnTick.Remove then
+                pcall(function() Events.OnTick.Remove(retryCompanionDogsFilter) end)
+            end
+        end
+        Events.OnTick.Add(retryCompanionDogsFilter)
+    end
 end

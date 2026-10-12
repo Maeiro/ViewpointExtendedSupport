@@ -4,6 +4,9 @@ import java.lang.reflect.Array;
 import java.lang.reflect.Constructor;
 import java.lang.reflect.Field;
 import java.lang.reflect.Method;
+import java.nio.ByteBuffer;
+import java.nio.ByteOrder;
+import java.nio.DoubleBuffer;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
@@ -12,19 +15,17 @@ import java.util.Map;
 import me.zed_0xff.zombie_buddy.Exposer;
 
 public final class Bridge {
-    private static final int VIEWPOINT_TOGGLE_KEY = 24;
-    private static final int INSERT_KEY = 210;
     private static final int LEFT_SHIFT_KEY = 42;
     private static final int RIGHT_SHIFT_KEY = 54;
     private static final int LEFT_CONTROL_KEY = 29;
     private static final int RIGHT_CONTROL_KEY = 157;
     private static final int LEFT_ALT_KEY = 56;
     private static final int RIGHT_ALT_KEY = 184;
+    private static final int DEFAULT_PREVIOUS_INTERACTION_KEY = 203;
+    private static final int DEFAULT_NEXT_INTERACTION_KEY = 205;
     private static final int MODIFIER_SHIFT = 1;
     private static final int MODIFIER_CONTROL = 2;
     private static final int MODIFIER_ALT = 4;
-    private static final int DEFAULT_ZOOM_OUT_KEY = 12;
-    private static final int DEFAULT_ZOOM_IN_KEY = 13;
     private static final int GROUP_ACTION_START = 1_000_000_000;
     private static final int GROUP_BACK_ACTION = Integer.MAX_VALUE;
     private static final Map<String, Object> interactionIcons = new HashMap<>();
@@ -35,38 +36,30 @@ public final class Bridge {
     private static final int GLFW_CURSOR_NORMAL = 212993;
     private static final int GLFW_CURSOR_HIDDEN = 212994;
     private static final int GLFW_CURSOR_DISABLED = 212995;
-    private static final float THIRD_PERSON_ZOOM_STEP = 0.5f;
-    private static final float THIRD_PERSON_ZOOM_MIN = -2.0f;
-    private static final float THIRD_PERSON_ZOOM_MAX = 8.0f;
-    private static final float THIRD_PERSON_BOOM_MIN = 0.5f;
+    private static final DoubleBuffer cursorXBuffer = ByteBuffer.allocateDirect(Double.BYTES)
+            .order(ByteOrder.nativeOrder()).asDoubleBuffer();
+    private static final DoubleBuffer cursorYBuffer = ByteBuffer.allocateDirect(Double.BYTES)
+            .order(ByteOrder.nativeOrder()).asDoubleBuffer();
 
-    private static volatile int firstPersonKey = VIEWPOINT_TOGGLE_KEY;
-    private static volatile int thirdPersonKey = VIEWPOINT_TOGGLE_KEY;
-    private static volatile int viewModeToggleKey;
-    private static volatile boolean thirdPersonRequiresShift = true;
     private static volatile boolean holdFreeCursor;
     private static volatile int freeCursorKey;
     private static volatile int freeCursorModifiers;
     private static volatile boolean autoCursorInUi = true;
-    private static volatile boolean debugLogging = true;
-    private static volatile boolean thirdPersonScrollZoom = true;
-    private static volatile int thirdPersonZoomOutKey = DEFAULT_ZOOM_OUT_KEY;
-    private static volatile int thirdPersonZoomInKey = DEFAULT_ZOOM_IN_KEY;
-    private static volatile int viewModeModifiers;
-    private static volatile int thirdPersonZoomOutModifiers;
-    private static volatile int thirdPersonZoomInModifiers;
+    private static volatile boolean debugLogging;
     private static volatile boolean groupContextMenuActionsEnabled = true;
-    private static volatile boolean skipSetupWizard = true;
-    private static volatile float thirdPersonZoomOffset;
-    private static volatile int pendingMouseWheel;
+    private static volatile boolean skipSetupWizard;
     private static volatile boolean autoCursorRequested;
     private static volatile boolean inventoryOpen;
     private static volatile boolean interactionMenuSuppressed;
     private static volatile boolean forcedCursor;
     private static volatile boolean freeCursorOverrideActive;
+    private static boolean cursorCaptureModeOverridden;
     private static volatile boolean lootCursorRequested;
     private static volatile boolean systemCursorHidden;
     private static volatile long systemCursorWindow;
+    private static volatile boolean uiCursorCenterPending;
+    private static volatile boolean uiMousePositionSyncFailureLogged;
+    private static volatile String lastCursorLifecycleState;
 
     private static volatile Field viewEnabled;
     private static volatile Field thirdPersonActive;
@@ -84,21 +77,27 @@ public final class Bridge {
     private static volatile InteractionMenu activeInteractionMenu;
     private static volatile Field lookYaw;
     private static volatile Field lookPitch;
-    private static volatile Method keyPressed;
     private static volatile Method keyDown;
-    private static volatile Method eatKeyPress;
     private static volatile Method resetCaches;
     private static volatile Method getCameraCharacter;
     private static volatile Method getPlayerVehicle;
-    private static volatile Method getMouseWheelState;
     private static volatile Class<?> vehicleMethodClass;
     private static volatile Method getDisplayWindow;
+    private static volatile Method getDisplayWidth;
+    private static volatile Method getDisplayHeight;
+    private static volatile Method glfwGetCursorPos;
+    private static volatile Method glfwSetCursorPos;
+    private static volatile Method getCoreInstance;
+    private static volatile Method coreGetScreenHeight;
+    private static volatile Field gameMouseX;
+    private static volatile Field gameMouseY;
     private static volatile Method glfwSetInputMode;
     private static volatile Method glfwGetInputMode;
+    private static volatile Method gameMouseGetX;
+    private static volatile Method gameMouseGetY;
     private static volatile Field viewpointFrames;
     private static volatile Field freeCameraActive;
     private static volatile Field freeCameraPlace;
-    private static volatile Field headTextHeight;
     private static volatile Constructor<?> worldToScreenConstructor;
     private static volatile Method worldToScreenSet;
     private static volatile Method worldToScreenPixel;
@@ -106,6 +105,16 @@ public final class Bridge {
     private static volatile Method screenHeight;
     private static volatile Object worldToScreen;
     private static volatile ALifeTargetAccess alifeTargetAccess;
+    private static volatile InteractionCycleAccess interactionCycleAccess;
+    private static volatile Object selectedInteractionTarget;
+    private static volatile int selectedInteractionPosition;
+    private static volatile int selectedInteractionCount;
+    private static volatile int previousInteractionKey = DEFAULT_PREVIOUS_INTERACTION_KEY;
+    private static volatile int nextInteractionKey = DEFAULT_NEXT_INTERACTION_KEY;
+    private static volatile boolean previousInteractionKeyDown;
+    private static volatile boolean nextInteractionKeyDown;
+    private static volatile float interactionCycleYaw;
+    private static volatile float interactionCyclePitch;
     private static volatile boolean alifeAimTargetFailureLogged;
 
     private static volatile long vanillaCursorHookCalls;
@@ -132,6 +141,9 @@ public final class Bridge {
     private static volatile boolean alifeTargetHookLogged;
     private static volatile boolean alifeTargetAddedLogged;
     private static volatile boolean alifeTargetFailureLogged;
+    private static volatile boolean interactionCycleFailureLogged;
+    private static volatile boolean interactionCycleHookLogged;
+    private static volatile boolean interactionCycleKeyboardLogged;
 
     static {
         Exposer.exposeClass(Bridge.class, "ViewpointExtendedSupport");
@@ -140,68 +152,16 @@ public final class Bridge {
     private Bridge() {
     }
 
-    public static void configure(int firstKey, int thirdKey, boolean requireShift,
-                                 boolean holdCursor, int cursorKey, boolean autoUi,
-                                 int modeToggleKey, boolean debug) {
-        configure(firstKey, thirdKey, requireShift, holdCursor, cursorKey, autoUi,
-                modeToggleKey, debug, true, true);
-    }
-
-    public static void configure(int firstKey, int thirdKey, boolean requireShift,
-                                 boolean holdCursor, int cursorKey, boolean autoUi,
-                                 int modeToggleKey, boolean debug, boolean scrollZoom) {
-        configure(firstKey, thirdKey, requireShift, holdCursor, cursorKey, autoUi,
-                modeToggleKey, debug, scrollZoom, true);
-    }
-
-    public static void configure(int firstKey, int thirdKey, boolean requireShift,
-                                 boolean holdCursor, int cursorKey, boolean autoUi,
-                                 int modeToggleKey, boolean debug, boolean scrollZoom,
-                                 boolean skipWizard) {
-        configure(firstKey, thirdKey, requireShift, holdCursor, cursorKey, autoUi,
-                modeToggleKey, debug, scrollZoom, skipWizard,
-                DEFAULT_ZOOM_OUT_KEY, DEFAULT_ZOOM_IN_KEY);
-    }
-
-    public static void configure(int firstKey, int thirdKey, boolean requireShift,
-                                 boolean holdCursor, int cursorKey, boolean autoUi,
-                                 int modeToggleKey, boolean debug, boolean scrollZoom,
-                                 boolean skipWizard, int zoomOutKey, int zoomInKey) {
-        configure(firstKey, thirdKey, requireShift, holdCursor, cursorKey, autoUi,
-                modeToggleKey, debug, scrollZoom, skipWizard, zoomOutKey, zoomInKey, true);
-    }
-
-    public static void configure(int firstKey, int thirdKey, boolean requireShift,
-                                 boolean holdCursor, int cursorKey, boolean autoUi,
-                                 int modeToggleKey, boolean debug, boolean scrollZoom,
-                                 boolean skipWizard, int zoomOutKey, int zoomInKey,
-                                 boolean groupActions) {
-        configure(firstKey, thirdKey, requireShift, holdCursor, cursorKey, autoUi,
-                modeToggleKey, debug, scrollZoom, skipWizard, zoomOutKey, zoomInKey,
-                groupActions, 0);
-    }
-
-    public static void configure(int firstKey, int thirdKey, boolean requireShift,
-                                 boolean holdCursor, int cursorKey, boolean autoUi,
-                                 int modeToggleKey, boolean debug, boolean scrollZoom,
-                                 boolean skipWizard, int zoomOutKey, int zoomInKey,
-                                 boolean groupActions, int packedModifiers) {
-        firstPersonKey = Math.max(0, firstKey);
-        thirdPersonKey = Math.max(0, thirdKey);
-        viewModeToggleKey = Math.max(0, modeToggleKey);
-        thirdPersonRequiresShift = requireShift;
+    public static void configure(boolean holdCursor, int cursorKey, boolean autoUi,
+                                 boolean debug, boolean skipWizard, boolean groupActions,
+                                 int cursorModifiers) {
         holdFreeCursor = holdCursor;
         freeCursorKey = Math.max(0, cursorKey);
-        freeCursorModifiers = unpackModifiers(packedModifiers, 0);
+        freeCursorModifiers = cursorModifiers
+                & (MODIFIER_SHIFT | MODIFIER_CONTROL | MODIFIER_ALT);
         autoCursorInUi = autoUi;
         debugLogging = debug;
-        thirdPersonScrollZoom = scrollZoom;
         skipSetupWizard = skipWizard;
-        thirdPersonZoomOutKey = Math.max(0, zoomOutKey);
-        thirdPersonZoomInKey = Math.max(0, zoomInKey);
-        viewModeModifiers = unpackModifiers(packedModifiers, 3);
-        thirdPersonZoomOutModifiers = unpackModifiers(packedModifiers, 6);
-        thirdPersonZoomInModifiers = unpackModifiers(packedModifiers, 9);
         if (groupContextMenuActionsEnabled != groupActions) {
             groupContextMenuActionsEnabled = groupActions;
             InteractionMenu menu = activeInteractionMenu;
@@ -250,6 +210,226 @@ public final class Bridge {
         } catch (Throwable ignored) {
             return false;
         }
+    }
+
+    public static void configureInteractionCycling(int previousKey, int nextKey) {
+        previousKey = Math.max(0, previousKey);
+        nextKey = Math.max(0, nextKey);
+        if (previousInteractionKey == previousKey && nextInteractionKey == nextKey) return;
+        previousInteractionKey = previousKey;
+        nextInteractionKey = nextKey;
+        previousInteractionKeyDown = false;
+        nextInteractionKeyDown = false;
+        clearInteractionTargetSelection();
+        if (debugLogging) {
+            System.out.println("[Viewpoint Extended Support] interaction cycling configured: previousKey="
+                    + previousKey + ", nextKey=" + nextKey);
+        }
+    }
+
+    public static int getInteractionCyclePosition() {
+        return selectedInteractionPosition;
+    }
+
+    public static int getInteractionCycleCount() {
+        return selectedInteractionCount;
+    }
+
+    public static Object cycleInteractionTarget(Object aimedTarget) {
+        boolean previousDown = isDown(previousInteractionKey);
+        boolean nextDown = isDown(nextInteractionKey);
+        boolean previousPressed = previousDown && !previousInteractionKeyDown;
+        boolean nextPressed = nextDown && !nextInteractionKeyDown;
+        previousInteractionKeyDown = previousDown;
+        nextInteractionKeyDown = nextDown;
+
+        if (debugLogging && !interactionCycleHookLogged) {
+            interactionCycleHookLogged = true;
+            System.out.println("[Viewpoint Extended Support] interaction cycling hook invoked: previousKey="
+                    + previousInteractionKey + ", nextKey=" + nextInteractionKey
+                    + ", aimedTarget=" + describeInteractionTarget(aimedTarget));
+        }
+
+        boolean keyPressed = previousPressed || nextPressed;
+        if (debugLogging && keyPressed) {
+            System.out.println("[Viewpoint Extended Support] interaction cycling key detected: key="
+                    + (previousPressed ? previousInteractionKey : nextInteractionKey)
+                    + ", viewEnabled=" + isViewEnabled()
+                    + ", menuSuppressed=" + interactionMenuSuppressed
+                    + ", autoCursor=" + autoCursorRequested
+                    + ", freeCursor=" + isFreeCursor());
+        }
+
+        if (!isViewEnabled() || interactionMenuSuppressed || autoCursorRequested || isFreeCursor()) {
+            if (debugLogging && keyPressed) {
+                System.out.println("[Viewpoint Extended Support] interaction cycling ignored: input is suppressed");
+            }
+            clearInteractionTargetSelection();
+            return aimedTarget;
+        }
+
+        try {
+            InteractionCycleAccess access = getInteractionCycleAccess();
+            if (access == null) {
+                if (debugLogging && keyPressed) {
+                    System.out.println("[Viewpoint Extended Support] interaction cycling ignored: target access unavailable");
+                }
+                return aimedTarget;
+            }
+            if (selectedInteractionTarget != null && cameraMovedSinceInteractionCycle(access)) {
+                clearInteractionTargetSelection();
+            }
+
+            Object foundValue = access.found.get(null);
+            if (!(foundValue instanceof java.util.List<?> found)) {
+                if (debugLogging && keyPressed) {
+                    System.out.println("[Viewpoint Extended Support] interaction cycling ignored: found targets are unavailable");
+                }
+                clearInteractionTargetSelection();
+                return aimedTarget;
+            }
+
+            ArrayList<Object> candidates = new ArrayList<>();
+            for (Object candidate : found) {
+                if (!isCyclableInteractionTarget(candidate, access)) continue;
+                Object object = access.targetObject.get(candidate);
+                boolean duplicate = false;
+                for (Object existing : candidates) {
+                    if (access.targetObject.get(existing) == object) {
+                        duplicate = true;
+                        break;
+                    }
+                }
+                if (!duplicate) candidates.add(candidate);
+            }
+
+            if (debugLogging && keyPressed) {
+                System.out.println("[Viewpoint Extended Support] interaction cycling candidates: count="
+                        + candidates.size() + ", aimed=" + describeInteractionTarget(aimedTarget)
+                        + ", list=" + describeInteractionCandidates(candidates, access));
+            }
+
+            if (selectedInteractionTarget != null
+                    && findInteractionTarget(candidates, selectedInteractionTarget, access) < 0) {
+                clearInteractionTargetSelection();
+            }
+
+            if ((previousPressed ^ nextPressed) && candidates.size() > 1) {
+                int current = selectedInteractionTarget == null
+                        ? findInteractionTarget(candidates, aimedTarget, access)
+                        : findInteractionTarget(candidates, selectedInteractionTarget, access);
+                int direction = nextPressed ? 1 : -1;
+                int selected = Math.floorMod((current < 0 ? (direction > 0 ? -1 : 0) : current)
+                        + direction, candidates.size());
+                selectedInteractionTarget = access.copyTarget(candidates.get(selected));
+                interactionCycleYaw = readLookAngle(access.lookYaw);
+                interactionCyclePitch = readLookAngle(access.lookPitch);
+                if (debugLogging) {
+                    System.out.println("[Viewpoint Extended Support] interaction cycling selected: position="
+                            + (selected + 1) + "/" + candidates.size()
+                            + ", target=" + describeInteractionTarget(candidates.get(selected)));
+                }
+            } else if (debugLogging && keyPressed) {
+                System.out.println("[Viewpoint Extended Support] interaction cycling ignored: fewer than two candidates");
+            }
+
+            if (selectedInteractionTarget == null) {
+                selectedInteractionPosition = 0;
+                selectedInteractionCount = 0;
+                return aimedTarget;
+            }
+
+            int selected = findInteractionTarget(candidates, selectedInteractionTarget, access);
+            if (selected < 0) {
+                clearInteractionTargetSelection();
+                return aimedTarget;
+            }
+            selectedInteractionPosition = selected + 1;
+            selectedInteractionCount = candidates.size();
+            return candidates.get(selected);
+        } catch (Throwable failure) {
+            clearInteractionTargetSelection();
+            if (debugLogging && !interactionCycleFailureLogged) {
+                interactionCycleFailureLogged = true;
+                System.out.println("[Viewpoint Extended Support] interaction target cycling failed: "
+                        + failure.getClass().getSimpleName() + ": " + failure.getMessage());
+            }
+            return aimedTarget;
+        }
+    }
+
+    private static boolean isCyclableInteractionTarget(Object target, InteractionCycleAccess access)
+            throws ReflectiveOperationException {
+        return target != null
+                && access.targetKind.getInt(target) != access.groundKind
+                && access.targetObject.get(target) != null;
+    }
+
+    private static int findInteractionTarget(java.util.List<?> targets, Object sought,
+                                             InteractionCycleAccess access)
+            throws ReflectiveOperationException {
+        if (sought == null) return -1;
+        for (int index = 0; index < targets.size(); index++) {
+            if (Boolean.TRUE.equals(access.targetSame.invoke(targets.get(index), sought))) return index;
+        }
+        return -1;
+    }
+
+    private static boolean cameraMovedSinceInteractionCycle(InteractionCycleAccess access)
+            throws ReflectiveOperationException {
+        return angleDifference(readLookAngle(access.lookYaw), interactionCycleYaw) > 0.035f
+                || Math.abs(readLookAngle(access.lookPitch) - interactionCyclePitch) > 0.035f;
+    }
+
+    private static float readLookAngle(Field field) throws ReflectiveOperationException {
+        return field.getFloat(null);
+    }
+
+    private static float angleDifference(float first, float second) {
+        float fullTurn = (float) (Math.PI * 2.0);
+        float difference = Math.abs((first - second) % fullTurn);
+        return Math.min(difference, fullTurn - difference);
+    }
+
+    private static InteractionCycleAccess getInteractionCycleAccess() {
+        InteractionCycleAccess access = interactionCycleAccess;
+        if (access != null) return access;
+        try {
+            access = new InteractionCycleAccess();
+            interactionCycleAccess = access;
+            return access;
+        } catch (ReflectiveOperationException failure) {
+            if (debugLogging && !interactionCycleFailureLogged) {
+                interactionCycleFailureLogged = true;
+                System.out.println("[Viewpoint Extended Support] interaction target access initialization failed: "
+                        + failure.getClass().getSimpleName() + ": " + failure.getMessage());
+            }
+            return null;
+        }
+    }
+
+    private static String describeInteractionTarget(Object target) {
+        return target == null ? "none" : target.getClass().getSimpleName();
+    }
+
+    private static String describeInteractionCandidates(java.util.List<?> candidates,
+                                                        InteractionCycleAccess access)
+            throws ReflectiveOperationException {
+        StringBuilder result = new StringBuilder("[");
+        for (int index = 0; index < candidates.size(); index++) {
+            if (index > 0) result.append(", ");
+            Object candidate = candidates.get(index);
+            Object object = access.targetObject.get(candidate);
+            result.append("kind=").append(access.targetKind.getInt(candidate))
+                    .append(':').append(describeInteractionTarget(object));
+        }
+        return result.append(']').toString();
+    }
+
+    private static void clearInteractionTargetSelection() {
+        selectedInteractionTarget = null;
+        selectedInteractionPosition = 0;
+        selectedInteractionCount = 0;
     }
 
     public static synchronized void setContextMenuIcon(String label, Object texture) {
@@ -310,11 +490,14 @@ public final class Bridge {
     }
 
     public static void setAutoCursorRequested(boolean requested) {
+        requested = requested && autoCursorInUi;
         boolean changed = autoCursorRequested != requested;
         autoCursorRequested = requested;
         if (changed) {
+            uiCursorCenterPending = requested && isViewEnabled();
             logDiagnosticState();
             applyCursorOverride();
+            logCursorLifecycle(requested ? "ui-open" : "ui-close", true);
         }
     }
 
@@ -410,20 +593,9 @@ public final class Bridge {
                 projection = constructor.newInstance();
                 worldToScreen = projection;
             }
-            if (!Boolean.TRUE.equals(setMethod.invoke(projection, frame, place, width, height))) {
-                return null;
-            }
+            setMethod.invoke(projection, frame, place, width, height);
 
-            Field headHeightField = headTextHeight;
-            if (headHeightField == null) {
-                headHeightField = field("viewpoint.platform.Tuning", "headTextHeight");
-                headTextHeight = headHeightField;
-            }
-            if (headHeightField == null) {
-                return null;
-            }
-            float offset = headHeightField.getFloat(null);
-            if (!Boolean.TRUE.equals(pixelMethod.invoke(projection, x, y, z, offset,
+            if (!Boolean.TRUE.equals(pixelMethod.invoke(projection, x, y, z, 0.0f,
                     companionDogTagPixel))) {
                 return null;
             }
@@ -463,65 +635,7 @@ public final class Bridge {
                 + ", auto=" + autoCursorRequested
                 + ", third=" + isThirdPerson()
                 + ", vehicle=" + isThirdPersonVehicle()
-                + ", zoomOffset=" + thirdPersonZoomOffset
                 + ", system=" + systemCursorModeName(readSystemCursorMode()));
-    }
-
-    public static void pollThirdPersonZoom() {
-        if (shouldSkipInteractionWheel()) {
-            pendingMouseWheel = 0;
-            return;
-        }
-        int wheel = pendingMouseWheel;
-        pendingMouseWheel = 0;
-        if (!isViewEnabled() || !isThirdPerson() || isFreeCursor()) {
-            return;
-        }
-
-        int steps = thirdPersonScrollZoom ? -wheel : 0;
-        if (thirdPersonZoomOutKey > 0
-                && isPressedWithModifiers(thirdPersonZoomOutKey, thirdPersonZoomOutModifiers)) {
-            eat(thirdPersonZoomOutKey);
-            steps++;
-        }
-        if (thirdPersonZoomInKey > 0
-                && isPressedWithModifiers(thirdPersonZoomInKey, thirdPersonZoomInModifiers)) {
-            eat(thirdPersonZoomInKey);
-            steps--;
-        }
-        if (steps == 0) {
-            return;
-        }
-
-        float previous = thirdPersonZoomOffset;
-        float next = clamp(previous + (steps * THIRD_PERSON_ZOOM_STEP),
-                THIRD_PERSON_ZOOM_MIN, THIRD_PERSON_ZOOM_MAX);
-        thirdPersonZoomOffset = next;
-        if (debugLogging && previous != next) {
-            System.out.println("[Viewpoint Extended Support] third-person camera zoom: offset=" + next);
-        }
-    }
-
-    public static void captureMouseWheel() {
-        if (shouldSkipInteractionWheel()) {
-            pendingMouseWheel = 0;
-            return;
-        }
-        int wheel = readMouseWheelState();
-        if (wheel == 0) {
-            return;
-        }
-        pendingMouseWheel = clampWheel(pendingMouseWheel + wheel);
-        if (debugLogging) {
-            System.out.println("[Viewpoint Extended Support] mouse wheel captured: delta=" + wheel);
-        }
-    }
-
-    public static float adjustThirdPersonBoom(float original) {
-        if (!isViewEnabled() || !isThirdPerson()) {
-            return original;
-        }
-        return Math.max(THIRD_PERSON_BOOM_MIN, original + thirdPersonZoomOffset);
     }
 
     public static void addALifeInteractionTargets(Object player, Object centerSquare) {
@@ -1175,6 +1289,40 @@ public final class Bridge {
         }
     }
 
+    private static final class InteractionCycleAccess {
+        private final Field found;
+        private final Field targetKind;
+        private final Field targetObject;
+        private final int groundKind;
+        private final Method targetSame;
+        private final Constructor<?> targetConstructor;
+        private final Method targetSet;
+        private final Field lookYaw;
+        private final Field lookPitch;
+
+        private InteractionCycleAccess() throws ReflectiveOperationException {
+            Class<?> targetsClass = Class.forName("viewpoint.interact.LootTargets");
+            Class<?> targetClass = Class.forName("viewpoint.interact.LootTargets$Target");
+            Class<?> lookClass = Class.forName("viewpoint.input.Look");
+            found = requiredField(targetsClass, "found");
+            targetKind = requiredField(targetClass, "kind");
+            targetObject = requiredField(targetClass, "object");
+            groundKind = requiredField(targetsClass, "GROUND").getInt(null);
+            targetSame = requiredMethod(targetClass, "same", targetClass);
+            targetConstructor = targetClass.getDeclaredConstructor();
+            targetConstructor.setAccessible(true);
+            targetSet = requiredMethod(targetClass, "set", targetClass);
+            lookYaw = requiredField(lookClass, "yaw");
+            lookPitch = requiredField(lookClass, "pitch");
+        }
+
+        private Object copyTarget(Object target) throws ReflectiveOperationException {
+            Object copy = targetConstructor.newInstance();
+            targetSet.invoke(copy, target);
+            return copy;
+        }
+    }
+
     private static final class InteractionMenu {
         private final Object rowsObject;
         private final ArrayList<Object> rows;
@@ -1269,8 +1417,28 @@ public final class Bridge {
     }
 
     public static void prepareMouseCursorUpdate() {
-        if (isViewEnabled() && freeCursorOverrideActive) {
+        if (!isViewEnabled()) {
+            uiCursorCenterPending = false;
+        } else if (autoCursorRequested || freeCursorOverrideActive) {
             setBoolean(lookWantCapture, "viewpoint.input.Look", "wantCapture", false);
+        }
+        logCursorLifecycle("look-enter", false);
+    }
+
+    public static void prepareCursorCaptureRequest() {
+        cursorCaptureModeOverridden = isViewEnabled()
+                && (autoCursorRequested || freeCursorOverrideActive)
+                && !getBoolean(cursorMode, "viewpoint.FP", "cursorMode");
+        if (cursorCaptureModeOverridden) {
+            // FP.viewInput publishes wantCapture on a different thread from Look's cursor update.
+            setBoolean(cursorMode, "viewpoint.FP", "cursorMode", true);
+        }
+    }
+
+    public static void finishCursorCaptureRequest() {
+        if (cursorCaptureModeOverridden) {
+            setBoolean(cursorMode, "viewpoint.FP", "cursorMode", false);
+            cursorCaptureModeOverridden = false;
         }
     }
 
@@ -1329,7 +1497,78 @@ public final class Bridge {
 
     public static boolean overrideLookMouseCursorUpdate(boolean original) {
         recordHook(7, "Look.onUpdateMouseCursor", original);
+        boolean centered = !original && uiCursorCenterPending && autoCursorRequested
+                && isViewEnabled() && readSystemCursorMode() == GLFW_CURSOR_NORMAL
+                && centerSystemCursor();
+        if (centered) {
+            uiCursorCenterPending = false;
+            synchronizeUiMousePosition();
+        }
+        logCursorLifecycle("look-exit centered=" + centered, centered);
         return overrideMouseCursorUpdateInternal(original);
+    }
+
+    public static void synchronizeUiMousePosition() {
+        if (!autoCursorRequested || !isViewEnabled()
+                || getBoolean(null, "viewpoint.input.Look", "captured")) {
+            return;
+        }
+
+        int cursorMode = readSystemCursorMode();
+        if (cursorMode != GLFW_CURSOR_NORMAL && cursorMode != GLFW_CURSOR_HIDDEN) {
+            return;
+        }
+
+        try {
+            if (getDisplayWindow == null) {
+                getDisplayWindow = method("org.lwjglx.opengl.Display", "getWindow");
+            }
+            if (getDisplayHeight == null) {
+                getDisplayHeight = method("org.lwjglx.opengl.Display", "getHeight");
+            }
+            if (glfwGetCursorPos == null) {
+                glfwGetCursorPos = method("org.lwjgl.glfw.GLFW", "glfwGetCursorPos",
+                        long.class, DoubleBuffer.class, DoubleBuffer.class);
+            }
+            if (getCoreInstance == null) {
+                getCoreInstance = method("zombie.core.Core", "getInstance");
+            }
+            if (coreGetScreenHeight == null) {
+                coreGetScreenHeight = method("zombie.core.Core", "getScreenHeight");
+            }
+            if (gameMouseX == null) {
+                gameMouseX = field("zombie.input.Mouse", "x");
+            }
+            if (gameMouseY == null) {
+                gameMouseY = field("zombie.input.Mouse", "y");
+            }
+            if (getDisplayWindow == null || getDisplayHeight == null || glfwGetCursorPos == null
+                    || getCoreInstance == null || coreGetScreenHeight == null
+                    || gameMouseX == null || gameMouseY == null) {
+                logUiMousePositionSyncFailure("mouse coordinate access unavailable");
+                return;
+            }
+
+            long window = ((Number) getDisplayWindow.invoke(null)).longValue();
+            if (window == 0L) {
+                return;
+            }
+
+            cursorXBuffer.clear();
+            cursorYBuffer.clear();
+            glfwGetCursorPos.invoke(null, window, cursorXBuffer, cursorYBuffer);
+            Object core = getCoreInstance.invoke(null);
+            int screenHeight = ((Number) coreGetScreenHeight.invoke(core)).intValue();
+            int displayHeight = ((Number) getDisplayHeight.invoke(null)).intValue();
+            int mouseX = (int) cursorXBuffer.get(0);
+            int mouseY = screenHeight - displayHeight + (int) cursorYBuffer.get(0) - 1;
+            synchronized (gameMouseX.getDeclaringClass()) {
+                gameMouseX.setInt(null, mouseX);
+                gameMouseY.setInt(null, mouseY);
+            }
+        } catch (Throwable error) {
+            logUiMousePositionSyncFailure(error.getClass().getSimpleName());
+        }
     }
 
     public static boolean shouldSkipMouseCursorTexture() {
@@ -1378,56 +1617,11 @@ public final class Bridge {
         }
     }
 
-    public static boolean interceptFirstPersonToggle() {
-        if (viewModeToggleKey > 0 && firstPersonKey == viewModeToggleKey) {
-            return true;
-        }
-        if (firstPersonKey == VIEWPOINT_TOGGLE_KEY) {
-            return false;
-        }
-        if (firstPersonKey > 0 && isPressed(firstPersonKey)
-                && !isDown(INSERT_KEY)) {
-            eat(firstPersonKey);
-            toggleView();
-        }
-        return true;
-    }
-
-    public static boolean interceptThirdPersonPoll() {
-        if (viewModeToggleKey > 0
-                && isPressedWithModifiers(viewModeToggleKey, viewModeModifiers)
-                && !isDown(INSERT_KEY)) {
-            eat(viewModeToggleKey);
-            toggleViewMode();
-            return true;
-        }
-        if (thirdPersonKey == VIEWPOINT_TOGGLE_KEY) {
-            return false;
-        }
-        if (thirdPersonKey > 0) {
-            if (isPressed(thirdPersonKey) && !isDown(INSERT_KEY)) {
-                eat(thirdPersonKey);
-                setThirdPerson(true);
-                System.out.println("[Viewpoint Extended Support] third person "
-                        + (isThirdPerson() ? "on" : "off"));
-            }
-        }
-        return true;
-    }
-
-    private static void toggleViewMode() {
-        if (!isViewEnabled()) {
-            toggleView();
-            setThirdPerson(false);
-            return;
-        }
-
-        setThirdPerson(!isThirdPerson());
-        System.out.println("[Viewpoint Extended Support] view mode "
-                + (isThirdPerson() ? "third person" : "first person"));
-    }
-
     public static void applyCursorOverride() {
+        if (!autoCursorInUi) {
+            autoCursorRequested = false;
+            uiCursorCenterPending = false;
+        }
         if (!holdFreeCursor && !autoCursorInUi) {
             autoCursorRequested = false;
             lootCursorRequested = false;
@@ -1482,8 +1676,10 @@ public final class Bridge {
         if (enabled) {
             call("viewpoint.Compat", "check");
         }
-        System.out.println("[Viewpoint Extended Support] first person "
-                + (enabled ? "on" : "off"));
+        if (debugLogging) {
+            System.out.println("[Viewpoint Extended Support] first person "
+                    + (enabled ? "on" : "off"));
+        }
         return isViewEnabled() == enabled;
     }
 
@@ -1496,30 +1692,20 @@ public final class Bridge {
         }
     }
 
-    private static boolean isPressed(int key) {
-        try {
-            if (keyPressed == null) {
-                keyPressed = method("zombie.input.GameKeyboard", "isKeyPressed", int.class);
-            }
-            return keyPressed != null && (Boolean) keyPressed.invoke(null, key);
-        } catch (Throwable ignored) {
-            return false;
-        }
-    }
-
     private static boolean isDown(int key) {
         try {
             if (keyDown == null) {
                 keyDown = method("zombie.input.GameKeyboard", "isKeyDown", int.class);
+                if (debugLogging && !interactionCycleKeyboardLogged) {
+                    interactionCycleKeyboardLogged = true;
+                    System.out.println("[Viewpoint Extended Support] interaction cycling keyboard query: available="
+                            + (keyDown != null));
+                }
             }
             return keyDown != null && (Boolean) keyDown.invoke(null, key);
         } catch (Throwable ignored) {
             return false;
         }
-    }
-
-    private static boolean isPressedWithModifiers(int key, int modifiers) {
-        return isPressed(key) && modifiersMatch(key, modifiers);
     }
 
     private static boolean isDownWithModifiers(int key, int modifiers) {
@@ -1538,44 +1724,6 @@ public final class Bridge {
                 && alt == ((modifiers & MODIFIER_ALT) != 0);
     }
 
-    private static int unpackModifiers(int packedModifiers, int shift) {
-        return (packedModifiers >>> shift)
-                & (MODIFIER_SHIFT | MODIFIER_CONTROL | MODIFIER_ALT);
-    }
-
-    private static int readMouseWheelState() {
-        try {
-            if (getMouseWheelState == null) {
-                getMouseWheelState = method("zombie.input.Mouse", "getWheelState");
-            }
-            if (getMouseWheelState == null) {
-                return 0;
-            }
-            return ((Number) getMouseWheelState.invoke(null)).intValue();
-        } catch (Throwable ignored) {
-            return 0;
-        }
-    }
-
-    private static float clamp(float value, float minimum, float maximum) {
-        return Math.max(minimum, Math.min(maximum, value));
-    }
-
-    private static int clampWheel(int value) {
-        return Math.max(-20, Math.min(20, value));
-    }
-
-    private static void eat(int key) {
-        try {
-            if (eatKeyPress == null) {
-                eatKeyPress = method("zombie.input.GameKeyboard", "eatKeyPress", int.class);
-            }
-            if (eatKeyPress != null) {
-                eatKeyPress.invoke(null, key);
-            }
-        } catch (Throwable ignored) {
-        }
-    }
 
     private static void setCursorMode(boolean enabled) {
         boolean previous = getBoolean(cursorMode, "viewpoint.FP", "cursorMode");
@@ -1625,6 +1773,47 @@ public final class Bridge {
         }
     }
 
+    private static boolean centerSystemCursor() {
+        try {
+            if (getDisplayWidth == null) {
+                getDisplayWidth = method("org.lwjglx.opengl.Display", "getWidth");
+            }
+            if (getDisplayHeight == null) {
+                getDisplayHeight = method("org.lwjglx.opengl.Display", "getHeight");
+            }
+            if (glfwGetCursorPos == null) {
+                glfwGetCursorPos = method("org.lwjgl.glfw.GLFW", "glfwGetCursorPos",
+                        long.class, DoubleBuffer.class, DoubleBuffer.class);
+            }
+            if (glfwSetCursorPos == null) {
+                glfwSetCursorPos = method("org.lwjgl.glfw.GLFW", "glfwSetCursorPos",
+                        long.class, double.class, double.class);
+            }
+            if (getDisplayWindow == null || getDisplayWidth == null || getDisplayHeight == null
+                    || glfwGetCursorPos == null || glfwSetCursorPos == null) {
+                return false;
+            }
+
+            long window = ((Number) getDisplayWindow.invoke(null)).longValue();
+            int width = ((Number) getDisplayWidth.invoke(null)).intValue();
+            int height = ((Number) getDisplayHeight.invoke(null)).intValue();
+            if (window == 0L || width <= 0 || height <= 0) {
+                return false;
+            }
+            double x = width / 2.0;
+            double y = height / 2.0;
+            cursorXBuffer.clear();
+            cursorYBuffer.clear();
+            glfwGetCursorPos.invoke(null, window, cursorXBuffer, cursorYBuffer);
+            if (cursorXBuffer.get(0) != x || cursorYBuffer.get(0) != y) {
+                glfwSetCursorPos.invoke(null, window, x, y);
+            }
+            return true;
+        } catch (Throwable ignored) {
+            return false;
+        }
+    }
+
     private static int readSystemCursorMode() {
         try {
             if (getDisplayWindow == null) {
@@ -1644,6 +1833,76 @@ public final class Bridge {
             return ((Number) glfwGetInputMode.invoke(null, window, GLFW_CURSOR)).intValue();
         } catch (Throwable ignored) {
             return -1;
+        }
+    }
+
+    private static void logCursorLifecycle(String stage, boolean force) {
+        if (!debugLogging) return;
+
+        boolean captured = getBoolean(null, "viewpoint.input.Look", "captured");
+        boolean wantCapture = getBoolean(lookWantCapture, "viewpoint.input.Look", "wantCapture");
+        int mode = readSystemCursorMode();
+        String state = "auto=" + autoCursorRequested
+                + ",free=" + isFreeCursor()
+                + ",override=" + freeCursorOverrideActive
+                + ",captured=" + captured
+                + ",wantCapture=" + wantCapture
+                + ",mode=" + systemCursorModeName(mode)
+                + ",centerPending=" + uiCursorCenterPending;
+        if (!force && state.equals(lastCursorLifecycleState)) return;
+        lastCursorLifecycleState = state;
+
+        System.out.println("[Viewpoint Extended Support] cursor lifecycle: " + stage
+                + ", " + state
+                + ", pointer=" + readCursorPositionForLog()
+                + ", uiPointer=" + readUiCursorPositionForLog());
+    }
+
+    private static void logUiMousePositionSyncFailure(String reason) {
+        if (!debugLogging || uiMousePositionSyncFailureLogged) {
+            return;
+        }
+        uiMousePositionSyncFailureLogged = true;
+        System.out.println("[Viewpoint Extended Support] UI mouse position sync unavailable: " + reason);
+    }
+
+    private static String readCursorPositionForLog() {
+        try {
+            if (getDisplayWindow == null) {
+                getDisplayWindow = method("org.lwjglx.opengl.Display", "getWindow");
+            }
+            if (glfwGetCursorPos == null) {
+                glfwGetCursorPos = method("org.lwjgl.glfw.GLFW", "glfwGetCursorPos",
+                        long.class, DoubleBuffer.class, DoubleBuffer.class);
+            }
+            if (getDisplayWindow == null || glfwGetCursorPos == null) return "unavailable";
+
+            long window = ((Number) getDisplayWindow.invoke(null)).longValue();
+            if (window == 0L) return "unavailable";
+            cursorXBuffer.clear();
+            cursorYBuffer.clear();
+            glfwGetCursorPos.invoke(null, window, cursorXBuffer, cursorYBuffer);
+            return "(" + cursorXBuffer.get(0) + "," + cursorYBuffer.get(0) + ")";
+        } catch (Throwable ignored) {
+            return "unavailable";
+        }
+    }
+
+    private static String readUiCursorPositionForLog() {
+        try {
+            if (gameMouseGetX == null) {
+                gameMouseGetX = method("zombie.input.Mouse", "getXA");
+            }
+            if (gameMouseGetY == null) {
+                gameMouseGetY = method("zombie.input.Mouse", "getYA");
+            }
+            if (gameMouseGetX == null || gameMouseGetY == null) return "unavailable";
+
+            Object x = gameMouseGetX.invoke(null);
+            Object y = gameMouseGetY.invoke(null);
+            return "(" + x + "," + y + ")";
+        } catch (Throwable ignored) {
+            return "unavailable";
         }
     }
 

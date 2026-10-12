@@ -7,8 +7,7 @@ import java.util.ArrayList;
 public final class ViewpointGroupingCompatibilityTest {
     @SuppressWarnings("unchecked")
     public static void main(String[] args) throws Exception {
-        Bridge.configure(24, 24, true, false, 56, true, 0, false,
-                true, true, 12, 13, true);
+        Bridge.configure(false, 56, true, false, true, true, 0);
 
         Class<?> rowsClass = Class.forName("viewpoint.interact.LootRows");
         ClassLoader viewpointLoader = rowsClass.getClassLoader();

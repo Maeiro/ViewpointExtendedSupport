@@ -1,11 +1,8 @@
 require "PZAPI/ModOptions"
 
 local Support = ViewpointExtendedSupport
-
-local function keyOrFallback(name, fallback)
-    if Keyboard and Keyboard[name] then return Keyboard[name] end
-    return fallback
-end
+local DEFAULT_PREVIOUS_INTERACTION_KEY = (Keyboard and Keyboard.KEY_LEFT) or 203
+local DEFAULT_NEXT_INTERACTION_KEY = (Keyboard and Keyboard.KEY_RIGHT) or 205
 
 local function mouseButtonOrFallback(button, fallback)
     if Mouse and Mouse.BTN_OFFSET then return Mouse.BTN_OFFSET + button end
@@ -28,25 +25,21 @@ end
 local options = {}
 if PZAPI and PZAPI.ModOptions then
     local modOptions = PZAPI.ModOptions:create("ViewpointExtendedSupport", "Viewpoint Extended Support")
-    options.viewModeKey = modOptions:addKeyBind("ViewModeToggleKey", "Toggle first/third-person mode", keyOrFallback("KEY_Z", 44))
-    options.viewModeModifier = addModifierOption(modOptions, "ViewModeToggleModifier", "View mode toggle modifiers", 2)
     options.holdCursor = modOptions:addTickBox("HoldFreeCursor", "Hold a key to use free mouse", true)
     options.cursorKey = modOptions:addKeyBind("FreeCursorKey", "Free mouse hold key", mouseButtonOrFallback(3, 1003))
     options.cursorModifier = addModifierOption(modOptions, "FreeCursorModifier", "Free mouse modifiers", 1)
     options.autoUi = modOptions:addTickBox("AutoFreeCursorInUI", "Automatically use free mouse in inventories and menus", true)
     options.ergonomicUi = modOptions:addTickBox("ErgonomicUIIntegration", "Integrate with Ergonomic UI", true)
     options.vehicleCamera = modOptions:addTickBox("ThirdPersonInVehicles", "Use third person in vehicles", true)
-    options.thirdPersonScrollZoom = modOptions:addTickBox("ThirdPersonScrollZoom", "Zoom third-person camera with mouse wheel", true)
-    options.thirdPersonZoomOutKey = modOptions:addKeyBind("ThirdPersonZoomOutKey", "Zoom third-person camera out", keyOrFallback("KEY_MINUS", 12))
-    options.thirdPersonZoomOutModifier = addModifierOption(modOptions, "ThirdPersonZoomOutModifier", "Zoom out modifiers", 1)
-    options.thirdPersonZoomInKey = modOptions:addKeyBind("ThirdPersonZoomInKey", "Zoom third-person camera in", keyOrFallback("KEY_EQUALS", 13))
-    options.thirdPersonZoomInModifier = addModifierOption(modOptions, "ThirdPersonZoomInModifier", "Zoom in modifiers", 1)
     options.groupContextMenuActions = modOptions:addTickBox("GroupContextMenuActions", "Use cascading Viewpoint interaction menus", true)
     options.lazyInteractionOptions = modOptions:addTickBox("LazyInteractionOptions", "Show View options before building interaction menus", true)
+    options.interactionPreviousKey = modOptions:addKeyBind("InteractionPreviousKey", "Previous nearby interaction target", DEFAULT_PREVIOUS_INTERACTION_KEY)
+    options.interactionNextKey = modOptions:addKeyBind("InteractionNextKey", "Next nearby interaction target", DEFAULT_NEXT_INTERACTION_KEY)
     options.hideInteractionMenuWhenInventoryOpen = modOptions:addTickBox("HideInteractionMenuWhenInventoryOpen", "Hide Viewpoint interaction menu while inventory is open", true)
-    options.skipSetup = modOptions:addTickBox("SkipSetupWizard", "Skip Viewpoint startup setup screen", true)
-    options.startViewpoint = modOptions:addTickBox("StartViewpointOnGameStart", "Start Viewpoint automatically when entering a game", true)
-    options.cursorDiagnostics = modOptions:addTickBox("CursorDiagnostics", "Log cursor and reticle diagnostics", true)
+    options.closeExtractionTrackerOnLoad = modOptions:addTickBox("CloseExtractionTrackerOnLoad", "Start Wolf Extraction Quest tracker closed", true)
+    options.skipSetup = modOptions:addTickBox("SkipSetupWizard", "Skip Viewpoint startup setup screen", false)
+    options.startViewpoint = modOptions:addTickBox("StartViewpointOnGameStart", "Start Viewpoint automatically when entering a game", false)
+    options.diagnostics = modOptions:addTickBox("CursorDiagnostics", "Enable diagnostic logging", false)
 end
 
 local function optionValue(option, fallback)
@@ -61,31 +54,23 @@ local function modifierMask(option, fallback)
     return masks[optionValue(option, fallback or 1)] or 0
 end
 
-local function packedModifierMasks()
-    return modifierMask(options.cursorModifier, 1)
-        + modifierMask(options.viewModeModifier, 2) * 8
-        + modifierMask(options.thirdPersonZoomOutModifier, 1) * 64
-        + modifierMask(options.thirdPersonZoomInModifier, 1) * 512
-end
-
 local function syncConfiguration()
     if not Support or not Support.configure then return end
     Support.configure(
-        24,
-        24,
-        true,
         optionValue(options.holdCursor, true),
         optionValue(options.cursorKey, 1003),
         optionValue(options.autoUi, true),
-        optionValue(options.viewModeKey, 44),
-        optionValue(options.cursorDiagnostics, true),
-        optionValue(options.thirdPersonScrollZoom, true),
-        optionValue(options.skipSetup, true),
-        optionValue(options.thirdPersonZoomOutKey, 12),
-        optionValue(options.thirdPersonZoomInKey, 13),
+        optionValue(options.diagnostics, false),
+        optionValue(options.skipSetup, false),
         optionValue(options.groupContextMenuActions, true),
-        packedModifierMasks()
+        modifierMask(options.cursorModifier, 1)
     )
+    if Support.configureInteractionCycling then
+        Support.configureInteractionCycling(
+            optionValue(options.interactionPreviousKey, DEFAULT_PREVIOUS_INTERACTION_KEY),
+            optionValue(options.interactionNextKey, DEFAULT_NEXT_INTERACTION_KEY)
+        )
+    end
 end
 
 local function isVisible(ui)
@@ -121,6 +106,9 @@ local CURSOR_WINDOW_CLASS_NAMES = {
     "ISCharacterInfoWindow",
 }
 local activeCursorWindows = {}
+local cursorRequestAbsentTicks = 0
+local cursorRequestLastAbsentTick = -1
+local CURSOR_REQUEST_RELEASE_DELAY = 5
 
 local function visibleInventory(getter)
     if type(getter) ~= "function" then return false end
@@ -138,9 +126,17 @@ end
 
 local function visibleErgonomicInventory()
     local panel = ErgonomicUI and ErgonomicUI.panel
-    if not isVisible(panel) or not panel.isBodyVisible then return false end
-    local ok, value = pcall(function() return panel:isBodyVisible() end)
-    return ok and value == true
+    if not panel then return false end
+    if not isVisible(panel) then
+        panel._viewpointSupportInventoryOpen = false
+        return false
+    end
+    local bodyVisible = false
+    if type(panel.isBodyVisible) == "function" then
+        local ok, value = pcall(function() return panel:isBodyVisible() end)
+        bodyVisible = ok and value == true
+    end
+    return bodyVisible or panel._viewpointSupportInventoryOpen == true
 end
 
 local function updateInteractionMenuSuppression()
@@ -173,6 +169,7 @@ local function visibleGameWindow()
 end
 
 local updateCursorRequest
+local tickCounter = 0
 
 local function installCursorWindowHook(className)
     local windowClass = _G[className]
@@ -255,6 +252,7 @@ local function installErgonomicUIIntegration()
         ErgUIPanel.togglePanelManual = function(self, ...)
             local result = originalToggle(self, ...)
             local visible = self:isVisible() and self:isBodyVisible()
+            self._viewpointSupportInventoryOpen = visible
             self._viewpointSupportCursorRequested = visible
             updateInteractionMenuSuppression()
             updateCursorRequest()
@@ -266,6 +264,7 @@ local function installErgonomicUIIntegration()
         local originalReveal = ErgUIPanel.revealFromContainer
         ErgUIPanel.revealFromContainer = function(self, ...)
             local result = originalReveal(self, ...)
+            self._viewpointSupportInventoryOpen = true
             self._viewpointSupportCursorRequested = true
             updateInteractionMenuSuppression()
             updateCursorRequest()
@@ -298,10 +297,26 @@ end
 updateCursorRequest = function()
     if not Support or not Support.setAutoCursorRequested then return end
     if not optionValue(options.autoUi, true) then
+        cursorRequestAbsentTicks = 0
+        cursorRequestLastAbsentTick = -1
         Support.setAutoCursorRequested(false)
         return
     end
-    Support.setAutoCursorRequested(visibleGameWindow() or ergonomicUiRequestsCursor())
+    local requested = visibleGameWindow() or ergonomicUiRequestsCursor()
+    if requested then
+        cursorRequestAbsentTicks = 0
+        cursorRequestLastAbsentTick = -1
+        Support.setAutoCursorRequested(true)
+        return
+    end
+
+    if cursorRequestLastAbsentTick ~= tickCounter then
+        cursorRequestAbsentTicks = cursorRequestAbsentTicks + 1
+        cursorRequestLastAbsentTick = tickCounter
+    end
+    if cursorRequestAbsentTicks >= CURSOR_REQUEST_RELEASE_DELAY then
+        Support.setAutoCursorRequested(false)
+    end
 end
 
 local vehicleCameraForced = false
@@ -501,10 +516,17 @@ local alifeNpcTagMenuFallbackLogged = false
 local lastALifeHarvestDiagnostic
 local lastALifeHarvestDiagnosticAt = 0
 
+local function diagnosticLog(message)
+    if optionValue(options.diagnostics, false) then
+        print("[Viewpoint Extended Support] " .. message)
+    end
+end
+
 local function logInteractionMenuDiagnostic(key, message)
+    if not optionValue(options.diagnostics, false) then return end
     if interactionMenuDiagnosticStates[key] == message then return end
     interactionMenuDiagnosticStates[key] = message
-    print("[Viewpoint Extended Support] interaction menu: " .. message)
+    diagnosticLog("interaction menu: " .. message)
 end
 
 local function isProjectALifeNpc(target)
@@ -599,7 +621,7 @@ local function logALifeHarvestResult(message)
     if message == lastALifeHarvestDiagnostic and now - lastALifeHarvestDiagnosticAt < 3000 then return end
     lastALifeHarvestDiagnostic = message
     lastALifeHarvestDiagnosticAt = now
-    print("[Viewpoint Extended Support] A-Life interaction harvest: " .. message)
+    diagnosticLog("A-Life interaction harvest: " .. message)
 end
 
 local function installViewpointVanillaMenuIconsIntegration()
@@ -771,19 +793,65 @@ local pendingInteractionTarget
 local pendingInteractionTicks = 0
 local lazyInteractionWarningLogged = false
 
+local function interactionTargetHeading(target)
+    if not target then return nil end
+
+    local ok, isGround = pcall(function()
+        if target:isFloor() then return true end
+        local sprite = target:getSprite()
+        local properties = sprite and sprite:getProperties()
+        return properties and IsoFlagType and properties:has(IsoFlagType.solidfloor) or false
+    end)
+    local title
+    if ok and isGround then
+        title = "Interact with Ground"
+    else
+        local okName, name = pcall(function() return target:getName() end)
+        if okName and type(name) == "string" and name ~= "" then
+            title = "Interact with " .. name
+        else
+            local okObjectName, objectName = pcall(function() return target:getObjectName() end)
+            if okObjectName and type(objectName) == "string" and objectName ~= ""
+                    and objectName ~= "IsoObject" then
+                objectName = objectName:gsub("^Iso", ""):gsub("(%l)(%u)", "%1 %2")
+                title = "Interact with " .. objectName
+            else
+                title = "Interact with Object"
+            end
+        end
+    end
+
+    if Support and type(Support.getInteractionCyclePosition) == "function"
+            and type(Support.getInteractionCycleCount) == "function" then
+        local okPosition, position = pcall(Support.getInteractionCyclePosition)
+        local okCount, count = pcall(Support.getInteractionCycleCount)
+        if okPosition and okCount and position > 0 and count > 1 then
+            title = title .. " (" .. tostring(position) .. "/" .. tostring(count) .. ")"
+        end
+    end
+    return title
+end
+
+local function applyInteractionTargetHeading(result, target)
+    if type(result) ~= "table" then return result end
+    local title = interactionTargetHeading(target)
+    if title then result.title = title end
+    return result
+end
+
 local function lazyInteractionHarvest(originalHarvest, player, target)
     diagnoseCharacterHarvestTarget(target)
     if not optionValue(options.lazyInteractionOptions, true)
             or not Support or type(Support.requestInteractionOptions) ~= "function" then
         pendingInteractionTarget = nil
         pendingInteractionTicks = 0
-        return originalHarvest(player, target)
+        return applyInteractionTargetHeading(originalHarvest(player, target), target)
     end
 
     if pendingInteractionTarget == target then
         pendingInteractionTarget = nil
         pendingInteractionTicks = 0
-        return originalHarvest(player, target)
+        return applyInteractionTargetHeading(originalHarvest(player, target), target)
     end
 
     pendingInteractionTarget = nil
@@ -791,6 +859,8 @@ local function lazyInteractionHarvest(originalHarvest, player, target)
     if Support.clearVanillaContextMenuIcons then
         Support.clearVanillaContextMenuIcons()
     end
+
+    local title = interactionTargetHeading(target)
 
     ViewpointInteract.actions = {{
         name = "View options",
@@ -802,7 +872,7 @@ local function lazyInteractionHarvest(originalHarvest, player, target)
                 pendingInteractionTarget = nil
                 pendingInteractionTicks = 0
                 if not lazyInteractionWarningLogged then
-                    print("[Viewpoint Extended Support] could not request deferred interaction options")
+                    diagnosticLog("could not request deferred interaction options")
                     lazyInteractionWarningLogged = true
                 end
             end
@@ -812,7 +882,7 @@ local function lazyInteractionHarvest(originalHarvest, player, target)
         enabled = true,
     }}
 
-    return { labels = { "View options" }, enabled = { true }, seen = 0 }
+    return { title = title, labels = { "View options" }, enabled = { true }, seen = 0 }
 end
 
 local function installLazyInteractionOptions()
@@ -879,7 +949,7 @@ local function aimedALifeNpc()
 
     if lastAimedALifeNpc then
         if not alifeNpcTagMenuFallbackLogged then
-            print("[Viewpoint Extended Support] A-Life NPC tag using the confirmed interaction-menu target")
+            diagnosticLog("A-Life NPC tag using the confirmed interaction-menu target")
             alifeNpcTagMenuFallbackLogged = true
         end
         return lastAimedALifeNpc
@@ -901,6 +971,61 @@ local function alifeNpcUid(target)
         end
     end
     return nil
+end
+
+local function alifeRecordForCompanionDogs(uid)
+    local alife = ProjectALife
+    if type(alife) ~= "table" then return nil end
+
+    local executor = alife.Executor
+    local records = executor and executor.mirror and executor.mirror.records
+    local record = type(records) == "table" and records[uid] or nil
+    if type(record) == "table" then return record end
+
+    local registry = alife.ActorRegistry
+    local lookup = type(registry) == "table" and (registry.peek or registry.read) or nil
+    if type(lookup) ~= "function" then return nil end
+    local ok, registered = pcall(lookup, uid)
+    return ok and type(registered) == "table" and registered or nil
+end
+
+local function isFriendlyOrAlliedALifeNpcForCompanionDogs(zombie)
+    local uid = alifeNpcUid(zombie)
+    if not uid or type(getSpecificPlayer) ~= "function" then return false end
+
+    local okPlayer, player = pcall(getSpecificPlayer, 0)
+    if not okPlayer or not player then return false end
+
+    local record = alifeRecordForCompanionDogs(uid)
+    local relations = ProjectALife and ProjectALife.Relations
+    if not record or type(relations) ~= "table" or type(relations.playerStance) ~= "function" then
+        return false
+    end
+
+    if type(relations.hostileToPlayer) == "function" then
+        local okHostile, hostile = pcall(relations.hostileToPlayer, record, player)
+        if okHostile and hostile == true then return false end
+    end
+
+    local okStance, stance = pcall(relations.playerStance, record, player)
+    if not okStance then return false end
+    stance = string.lower(tostring(stance or ""))
+    return stance == "friendly" or stance == "allied"
+end
+
+local function installCompanionDogsFriendlyNpcFilter()
+    local dogs = CompanionDogs
+    if type(dogs) ~= "table" or type(dogs.isFriendlyNPC) ~= "function" then return end
+    if dogs._viewpointSupportALifeFriendlyNPC == dogs.isFriendlyNPC then return end
+
+    local original = dogs.isFriendlyNPC
+    local wrapper = function(zombie, ...)
+        if isFriendlyOrAlliedALifeNpcForCompanionDogs(zombie) then return true end
+        return original(zombie, ...)
+    end
+    dogs.isFriendlyNPC = wrapper
+    dogs._viewpointSupportALifeFriendlyNPC = wrapper
+    diagnosticLog("Companion Dogs ignores Friendly/Allied A-Life NPCs in client threat checks")
 end
 
 local ALIFE_NPC_TAG_LOWERING_TILES = 0.2
@@ -941,7 +1066,7 @@ local function installALifeNpcTagIntegration()
     if type(npcTags) ~= "table" or type(npcTags.hovered) ~= "function"
             or type(npcTags.extraLines) ~= "function" then
         if not alifeNpcTagWaitingLogged then
-            print("[Viewpoint Extended Support] A-Life NPC tag integration is waiting for ProjectALifeJimmy.NpcTags")
+            diagnosticLog("A-Life NPC tag integration is waiting for ProjectALifeJimmy.NpcTags")
             alifeNpcTagWaitingLogged = true
         end
         return
@@ -954,19 +1079,19 @@ local function installALifeNpcTagIntegration()
             if not viewpointAimHudActive() then return originalHovered(playerNum, player) end
             local target = aimedALifeNpc()
             if not target and not alifeNpcTagNoAimLogged then
-                print("[Viewpoint Extended Support] A-Life NPC tag has no Viewpoint aimed NPC target")
+                diagnosticLog("A-Life NPC tag has no Viewpoint aimed NPC target")
                 alifeNpcTagNoAimLogged = true
             end
             local uid = target and alifeNpcUid(target) or nil
             if not uid then
                 if target and not alifeNpcTagUidFailureLogged then
-                    print("[Viewpoint Extended Support] A-Life NPC tag target has no A-Life UID")
+                    diagnosticLog("A-Life NPC tag target has no A-Life UID")
                     alifeNpcTagUidFailureLogged = true
                 end
                 return nil
             end
             if not alifeNpcTagTargetLogged then
-                print("[Viewpoint Extended Support] A-Life NPC tag resolved an aimed NPC")
+                diagnosticLog("A-Life NPC tag resolved an aimed NPC")
                 alifeNpcTagTargetLogged = true
             end
             npcTags._viewpointSupportAimedTarget = target
@@ -1006,7 +1131,7 @@ local function installALifeNpcTagIntegration()
         npcTags._viewpointSupportExtraLines = wrapper
     end
     if not alifeNpcTagIntegrationLogged then
-        print("[Viewpoint Extended Support] A-Life NPC tag hover integration installed")
+        diagnosticLog("A-Life NPC tag hover integration installed")
         alifeNpcTagIntegrationLogged = true
     end
 
@@ -1020,14 +1145,14 @@ local function installALifeNpcTagIntegration()
                 local target = npcTags._viewpointSupportAimedTarget
                 if target and not self.show then
                     if not alifeNpcTagDataFailureLogged then
-                        print("[Viewpoint Extended Support] A-Life NPC tag target found, but its tag data produced no label")
+                        diagnosticLog("A-Life NPC tag target found, but its tag data produced no label")
                         alifeNpcTagDataFailureLogged = true
                     end
                 elseif self.show then
                     local projected = placeNpcTagAboveAimedNpc(self, target)
                     if not projected then self.show = nil end
                     if not alifeNpcTagProjectionLogged then
-                        print("[Viewpoint Extended Support] A-Life NPC tag head projection "
+                        diagnosticLog("A-Life NPC tag head projection "
                             .. (projected and "succeeded" or "failed"))
                         alifeNpcTagProjectionLogged = true
                     end
@@ -1039,12 +1164,16 @@ local function installALifeNpcTagIntegration()
         label._viewpointSupportPrerender = wrapper
     end
     if label and type(label.prerender) == "function" and not alifeNpcTagLabelLogged then
-        print("[Viewpoint Extended Support] A-Life NPC tag label hook installed")
+        diagnosticLog("A-Life NPC tag label hook installed")
         alifeNpcTagLabelLogged = true
     end
 end
 
-local COMPANION_DOG_TAG_HEIGHT_ADJUSTMENT = 0.5
+local COMPANION_DOG_TAG_HEAD_OFFSET = 55
+local COMPANION_DOG_TAG_WIDTH = 260
+local COMPANION_DOG_TAG_LINE_HEIGHT = 16
+local companionDogTagHookLogged = false
+local companionDogTagProjectionLogged = false
 
 local function installCompanionDogTagProjection()
     if not Support or type(Support.projectCompanionDogTag) ~= "function"
@@ -1068,14 +1197,24 @@ local function installCompanionDogTagProjection()
                                 and Support.isViewEnabled() then
                             local dog = self.dog
                             local projectedOk, projected = pcall(Support.projectCompanionDogTag,
-                                self.playerNum, dog:getX(), dog:getY(),
-                                dog:getZ() - COMPANION_DOG_TAG_HEIGHT_ADJUSTMENT)
+                                self.playerNum, dog:getX(), dog:getY(), dog:getZ())
                             if projectedOk and projected and projected.size
                                     and projected:size() >= 2 then
-                                local screenX = projected:get(0) - getPlayerScreenLeft(self.playerNum)
-                                local screenY = projected:get(1) - getPlayerScreenTop(self.playerNum)
-                                self:setX(screenX - 130)
-                                self:setY(screenY - #self.lines * 16)
+                                local positionOk = pcall(function()
+                                    local screenX = projected:get(0) - getPlayerScreenLeft(self.playerNum)
+                                    local zoom = getCore():getZoom(self.playerNum)
+                                    if not zoom or zoom <= 0 then zoom = 1 end
+                                    local screenY = projected:get(1) - getPlayerScreenTop(self.playerNum)
+                                        - COMPANION_DOG_TAG_HEAD_OFFSET / zoom
+                                    self:setX(screenX - COMPANION_DOG_TAG_WIDTH / 2)
+                                    self:setY(screenY - #self.lines * COMPANION_DOG_TAG_LINE_HEIGHT)
+                                end)
+                                if not positionOk then
+                                    self.draw = false
+                                elseif not companionDogTagProjectionLogged then
+                                    diagnosticLog("Companion Dogs name-tag camera projection succeeded")
+                                    companionDogTagProjectionLogged = true
+                                end
                             else
                                 self.draw = false
                             end
@@ -1084,15 +1223,60 @@ local function installCompanionDogTagProjection()
                     end
                     uiTable.prerender = wrapper
                     uiTable._viewpointSupportDogTagPrerender = wrapper
+                    if not companionDogTagHookLogged then
+                        diagnosticLog("Companion Dogs name-tag camera hook installed")
+                        companionDogTagHookLogged = true
+                    end
                 end
             end
         end
     end
 end
 
-local tickCounter = 0
+local extractionTrackerClosePending = false
+
+local function logInteractionCycleKeyEvent(key)
+    if not optionValue(options.diagnostics, false) then return end
+
+    local previousKey = optionValue(options.interactionPreviousKey, DEFAULT_PREVIOUS_INTERACTION_KEY)
+    local nextKey = optionValue(options.interactionNextKey, DEFAULT_NEXT_INTERACTION_KEY)
+    if key ~= previousKey and key ~= nextKey
+            and key ~= 200 and key ~= 203 and key ~= 205 and key ~= 208 then return end
+
+    print("[Viewpoint Extended Support] interaction cycling key event: key=" .. tostring(key)
+        .. ", previousKey=" .. tostring(previousKey)
+        .. ", nextKey=" .. tostring(nextKey))
+end
+
+if Events and Events.OnKeyPressed then
+    Events.OnKeyPressed.Add(logInteractionCycleKeyEvent)
+end
+
+local function closeExtractionTrackerOnLoad()
+    if not extractionTrackerClosePending then return end
+    local trackerClass = WQS_GPSWindow
+    if type(trackerClass) ~= "table" then return end
+    local tracker = trackerClass.instance
+    if type(tracker) ~= "table" or type(tracker.isVisible) ~= "function" then return end
+
+    local ok, visible = pcall(function() return tracker:isVisible() end)
+    if not ok then return end
+
+    if visible then
+        local closeOk = pcall(function()
+            tracker:setVisible(false)
+            tracker:removeFromUIManager()
+        end)
+        if not closeOk then return end
+    end
+
+    WQSCheckFlip = true
+    extractionTrackerClosePending = false
+end
+
 Events.OnTick.Add(function()
     tickCounter = tickCounter + 1
+    closeExtractionTrackerOnLoad()
     installCursorWindowHooks()
     if pendingInteractionTarget then
         pendingInteractionTicks = pendingInteractionTicks + 1
@@ -1104,11 +1288,9 @@ Events.OnTick.Add(function()
     if Support and Support.diagnosticTick then
         Support.diagnosticTick()
     end
-    if Support and Support.pollThirdPersonZoom then
-        Support.pollThirdPersonZoom()
-    end
     if tickCounter % 10 == 0 then
         syncConfiguration()
+        installCompanionDogsFriendlyNpcFilter()
         installVanillaInventoryCursorIntegration()
         installErgonomicUIIntegration()
         installContextMenuIconsIntegration()
@@ -1122,6 +1304,8 @@ Events.OnTick.Add(function()
 end)
 
 Events.OnGameStart.Add(function()
+    extractionTrackerClosePending = optionValue(options.closeExtractionTrackerOnLoad, true)
+    closeExtractionTrackerOnLoad()
     syncConfiguration()
     installCursorWindowHooks()
     installVanillaInventoryCursorIntegration()
@@ -1130,8 +1314,9 @@ Events.OnGameStart.Add(function()
     installViewpointVanillaMenuIconsIntegration()
     installLazyInteractionOptions()
     installALifeNpcTagIntegration()
+    installCompanionDogsFriendlyNpcFilter()
     installCompanionDogTagProjection()
-    if optionValue(options.startViewpoint, true) and Support and Support.enableViewpoint then
+    if optionValue(options.startViewpoint, false) and Support and Support.enableViewpoint then
         Support.enableViewpoint()
     end
 end)

@@ -15,7 +15,7 @@ final class WorldToScreen {
         this.place = place;
         this.width = width;
         this.height = height;
-        return frame != null && width > 0 && height > 0;
+        return false;
     }
 
     boolean pixel(float x, float y, float z, float headHeight, float[] out) {
