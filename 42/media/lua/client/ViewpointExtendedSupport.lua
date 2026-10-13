@@ -23,24 +23,37 @@ local function addModifierOption(modOptions, id, name, selected)
 end
 
 local options = {}
+local conversationCursorOwned = false
 if PZAPI and PZAPI.ModOptions then
     local modOptions = PZAPI.ModOptions:create("ViewpointExtendedSupport", "Viewpoint Extended Support")
+    modOptions:addTitle("Cursor and Interface")
     options.holdCursor = modOptions:addTickBox("HoldFreeCursor", "Hold a key to use free mouse", true)
     options.cursorKey = modOptions:addKeyBind("FreeCursorKey", "Free mouse hold key", mouseButtonOrFallback(3, 1003))
     options.cursorModifier = addModifierOption(modOptions, "FreeCursorModifier", "Free mouse modifiers", 1)
     options.autoUi = modOptions:addTickBox("AutoFreeCursorInUI", "Automatically use free mouse in inventories and menus", true)
     options.ergonomicUi = modOptions:addTickBox("ErgonomicUIIntegration", "Integrate with Ergonomic UI", true)
-    options.vehicleCamera = modOptions:addTickBox("ThirdPersonInVehicles", "Use third person in vehicles", true)
+    options.hideInteractionMenuWhenInventoryOpen = modOptions:addTickBox("HideInteractionMenuWhenInventoryOpen", "Hide Viewpoint interaction menu while inventory is open", true)
+
+    modOptions:addTitle("Vehicle Camera")
+    options.vehicleCameraMode = modOptions:addComboBox("VehicleCameraMode", "Vehicle camera mode")
+    options.vehicleCameraMode:addItem("Off", false)
+    options.vehicleCameraMode:addItem("Third person in vehicle, first person on exit", true)
+    options.vehicleCameraMode:addItem("Keep previous view in vehicle", false)
+
+    modOptions:addTitle("Interaction Menu")
     options.groupContextMenuActions = modOptions:addTickBox("GroupContextMenuActions", "Use cascading Viewpoint interaction menus", true)
     options.cascadeContainerContents = modOptions:addTickBox("CascadeContainerContents", "Show container contents in a submenu", true)
     options.lazyInteractionOptions = modOptions:addTickBox("LazyInteractionOptions", "Show View options before building interaction menus", true)
     options.interactionPreviousKey = modOptions:addKeyBind("InteractionPreviousKey", "Previous nearby interaction target", DEFAULT_PREVIOUS_INTERACTION_KEY)
     options.interactionNextKey = modOptions:addKeyBind("InteractionNextKey", "Next nearby interaction target", DEFAULT_NEXT_INTERACTION_KEY)
     options.interactionCycleScrollModifier = addModifierOption(modOptions, "InteractionCycleScrollModifier", "Cycle nearby targets with scroll modifier", 4)
-    options.hideInteractionMenuWhenInventoryOpen = modOptions:addTickBox("HideInteractionMenuWhenInventoryOpen", "Hide Viewpoint interaction menu while inventory is open", true)
+
+    modOptions:addTitle("Startup")
     options.closeExtractionTrackerOnLoad = modOptions:addTickBox("CloseExtractionTrackerOnLoad", "Start Wolf Extraction Quest tracker closed", true)
     options.skipSetup = modOptions:addTickBox("SkipSetupWizard", "Skip Viewpoint startup setup screen", false)
     options.startViewpoint = modOptions:addTickBox("StartViewpointOnGameStart", "Start Viewpoint automatically when entering a game", false)
+
+    modOptions:addTitle("Diagnostics")
     options.diagnostics = modOptions:addTickBox("CursorDiagnostics", "Enable diagnostic logging", false)
 end
 
@@ -51,6 +64,17 @@ local function optionValue(option, fallback)
     return value
 end
 
+local VEHICLE_CAMERA_OFF = 1
+local VEHICLE_CAMERA_FORCE_THIRD_PERSON = 2
+local VEHICLE_CAMERA_KEEP_PREVIOUS_VIEW = 3
+
+local function vehicleCameraMode()
+    local mode = optionValue(options.vehicleCameraMode, VEHICLE_CAMERA_FORCE_THIRD_PERSON)
+    if mode == VEHICLE_CAMERA_OFF or mode == VEHICLE_CAMERA_FORCE_THIRD_PERSON
+            or mode == VEHICLE_CAMERA_KEEP_PREVIOUS_VIEW then return mode end
+    return VEHICLE_CAMERA_FORCE_THIRD_PERSON
+end
+
 local function modifierMask(option, fallback)
     local masks = { 0, 1, 2, 4, 3, 5, 6, 7 }
     return masks[optionValue(option, fallback or 1)] or 0
@@ -59,9 +83,9 @@ end
 local function syncConfiguration()
     if not Support or not Support.configure then return end
     Support.configure(
-        optionValue(options.holdCursor, true),
+        optionValue(options.holdCursor, true) and not conversationCursorOwned,
         optionValue(options.cursorKey, 1003),
-        optionValue(options.autoUi, true),
+        optionValue(options.autoUi, true) or conversationCursorOwned,
         optionValue(options.diagnostics, false),
         optionValue(options.skipSetup, false),
         optionValue(options.groupContextMenuActions, true),
@@ -83,6 +107,33 @@ local function isVisible(ui)
     if not ui or not ui.isVisible then return false end
     local ok, value = pcall(function() return ui:isVisible() end)
     return ok and value == true
+end
+
+local function isALifeConversationOpen()
+    local integration = ViewpointExtendedSupportALife
+    if integration and type(integration.isConversationOpen) == "function" then
+        return integration.isConversationOpen()
+    end
+    local menu = ProjectALife and ProjectALife.TalkMenu
+    local window = menu and menu.instance
+    if not window or not Support or type(Support.isViewEnabled) ~= "function" then return false end
+    local ok, enabled = pcall(Support.isViewEnabled)
+    if not ok or enabled ~= true then return false end
+    if window.playerNum ~= nil and window.playerNum ~= 0 then return false end
+    return isVisible(window)
+end
+
+local function syncConversationCursorMode()
+    local talking = isALifeConversationOpen()
+    if talking == conversationCursorOwned then return false end
+
+    local closed = conversationCursorOwned and not talking
+    if closed and Support and type(Support.setAutoCursorRequested) == "function" then
+        Support.setAutoCursorRequested(false)
+    end
+    conversationCursorOwned = talking
+    syncConfiguration()
+    return closed
 end
 
 local VEHICLE_CURSOR_WINDOWS = {
@@ -119,7 +170,16 @@ local CURSOR_REQUEST_RELEASE_DELAY = 5
 local function visibleInventory(getter)
     if type(getter) ~= "function" then return false end
     local ok, ui = pcall(getter, 0)
-    return ok and isVisible(ui)
+    if not ok or not isVisible(ui) then return false end
+
+    local collapsed = ui.isCollapsed
+    if type(collapsed) == "function" then
+        local collapsedOk, value = pcall(collapsed, ui)
+        if collapsedOk then collapsed = value end
+    elseif collapsed == nil then
+        collapsed = ui.collapsed
+    end
+    return collapsed ~= true
 end
 
 local function playerIsInVehicle()
@@ -137,12 +197,17 @@ local function visibleErgonomicInventory()
         panel._viewpointSupportInventoryOpen = false
         return false
     end
-    local bodyVisible = false
+    local bodyVisible
     if type(panel.isBodyVisible) == "function" then
         local ok, value = pcall(function() return panel:isBodyVisible() end)
-        bodyVisible = ok and value == true
+        if ok then bodyVisible = value == true end
     end
-    return bodyVisible or panel._viewpointSupportInventoryOpen == true
+    if bodyVisible == false then
+        panel._viewpointSupportInventoryOpen = false
+        panel._viewpointSupportCursorRequested = false
+        return false
+    end
+    return bodyVisible == true or panel._viewpointSupportInventoryOpen == true
 end
 
 local function updateInteractionMenuSuppression()
@@ -155,7 +220,8 @@ local function updateInteractionMenuSuppression()
     end
     if Support.setInteractionMenuSuppressed then
         Support.setInteractionMenuSuppressed(
-            optionValue(options.hideInteractionMenuWhenInventoryOpen, true) and inventoryOpen
+            isALifeConversationOpen()
+                or (optionValue(options.hideInteractionMenuWhenInventoryOpen, true) and inventoryOpen)
         )
     end
 end
@@ -169,6 +235,25 @@ local function visibleGameWindow()
     for window, className in pairs(activeCursorWindows) do
         if allowedClasses[className] and isVisible(window) then
             return true
+        end
+    end
+
+    local manager = UIManager
+    if not manager or type(manager.getUI) ~= "function" then return false end
+    local ok, windows = pcall(manager.getUI)
+    if not ok or not windows or type(windows.size) ~= "function" or type(windows.get) ~= "function" then
+        return false
+    end
+    local sizeOk, size = pcall(function() return windows:size() end)
+    if not sizeOk or type(size) ~= "number" then return false end
+    for index = 0, size - 1 do
+        local windowOk, window = pcall(function() return windows:get(index) end)
+        if windowOk and window then
+            if type(window.getTable) == "function" then
+                local tableOk, uiTable = pcall(function() return window:getTable() end)
+                if tableOk and uiTable then window = uiTable end
+            end
+            if allowedClasses[window.Type] and isVisible(window) then return true end
         end
     end
     return false
@@ -302,46 +387,115 @@ end
 
 updateCursorRequest = function()
     if not Support or not Support.setAutoCursorRequested then return end
-    if not optionValue(options.autoUi, true) then
-        cursorRequestAbsentTicks = 0
-        cursorRequestLastAbsentTick = -1
-        Support.setAutoCursorRequested(false)
-        return
+    local conversationClosed = syncConversationCursorMode()
+    local hasOtherUi = visibleGameWindow() or ergonomicUiRequestsCursor()
+    local requested = conversationCursorOwned or hasOtherUi
+    if not conversationCursorOwned and not optionValue(options.autoUi, true) then
+        requested = false
     end
-    local requested = visibleGameWindow() or ergonomicUiRequestsCursor()
+
     if requested then
         cursorRequestAbsentTicks = 0
         cursorRequestLastAbsentTick = -1
         Support.setAutoCursorRequested(true)
-        return
-    end
-
-    if cursorRequestLastAbsentTick ~= tickCounter then
+    elseif cursorRequestLastAbsentTick ~= tickCounter then
         cursorRequestAbsentTicks = cursorRequestAbsentTicks + 1
         cursorRequestLastAbsentTick = tickCounter
-    end
-    if cursorRequestAbsentTicks >= CURSOR_REQUEST_RELEASE_DELAY then
+        if cursorRequestAbsentTicks >= CURSOR_REQUEST_RELEASE_DELAY then
+            Support.setAutoCursorRequested(false)
+        end
+    elseif cursorRequestAbsentTicks >= CURSOR_REQUEST_RELEASE_DELAY then
         Support.setAutoCursorRequested(false)
+    end
+
+    if conversationClosed and not hasOtherUi and type(Support.isFreeCursor) == "function"
+            and not Support.isFreeCursor() then
+        local qol = ViewpointQOL
+        if qol and type(qol.lockMouse) == "function" and type(qol.isAvailable) == "function" then
+            local ok, available = pcall(qol.isAvailable)
+            if ok and available then pcall(qol.lockMouse) end
+        end
     end
 end
 
 local vehicleCameraForced = false
+local vehicleCameraModeOnEntry
+local previousThirdPersonView
+local lastOnFootThirdPersonView
+
+local function rememberOnFootCamera()
+    if playerIsInVehicle()
+            or not Support or type(Support.isViewEnabled) ~= "function"
+            or type(Support.isThirdPerson) ~= "function" then return end
+    local enabledOk, enabled = pcall(Support.isViewEnabled)
+    if not enabledOk or enabled ~= true then return end
+    local viewOk, thirdPerson = pcall(Support.isThirdPerson)
+    if viewOk and type(thirdPerson) == "boolean" then
+        lastOnFootThirdPersonView = thirdPerson
+    end
+end
 
 local function onEnterVehicle(player)
     if player ~= getSpecificPlayer(0) then return end
-    if not optionValue(options.vehicleCamera, true) then return end
+    local mode = vehicleCameraMode()
+    if mode == VEHICLE_CAMERA_OFF then return end
     if not Support or not Support.isViewEnabled or not Support.setThirdPerson then return end
     if not Support.isViewEnabled() then return end
+    if vehicleCameraForced then return end
+    vehicleCameraModeOnEntry = mode
+    previousThirdPersonView = nil
+    if mode == VEHICLE_CAMERA_KEEP_PREVIOUS_VIEW then
+        previousThirdPersonView = lastOnFootThirdPersonView
+        if not playerIsInVehicle() or previousThirdPersonView == nil then
+            local ok, thirdPerson = pcall(Support.isThirdPerson)
+            if ok and type(thirdPerson) == "boolean" then
+                previousThirdPersonView = thirdPerson
+            end
+        end
+    end
     vehicleCameraForced = true
-    Support.setThirdPerson(true)
+    if mode == VEHICLE_CAMERA_FORCE_THIRD_PERSON then
+        Support.setThirdPerson(true)
+    elseif previousThirdPersonView ~= nil then
+        Support.setThirdPerson(previousThirdPersonView)
+    end
 end
 
 local function onExitVehicle(player)
     if player and player ~= getSpecificPlayer(0) then return end
     if vehicleCameraForced and Support and Support.setThirdPerson then
-        Support.setThirdPerson(false)
+        if vehicleCameraModeOnEntry == VEHICLE_CAMERA_FORCE_THIRD_PERSON then
+            Support.setThirdPerson(false)
+        elseif vehicleCameraModeOnEntry == VEHICLE_CAMERA_KEEP_PREVIOUS_VIEW
+                and previousThirdPersonView ~= nil then
+            Support.setThirdPerson(previousThirdPersonView)
+        end
     end
     vehicleCameraForced = false
+    vehicleCameraModeOnEntry = nil
+    previousThirdPersonView = nil
+end
+
+local function maintainVehicleCamera()
+    if not vehicleCameraForced or not playerIsInVehicle()
+            or not Support or type(Support.isViewEnabled) ~= "function"
+            or type(Support.isThirdPerson) ~= "function"
+            or type(Support.setThirdPerson) ~= "function" then return end
+    local enabledOk, enabled = pcall(Support.isViewEnabled)
+    if not enabledOk or enabled ~= true then return end
+
+    local target
+    if vehicleCameraModeOnEntry == VEHICLE_CAMERA_FORCE_THIRD_PERSON then
+        target = true
+    elseif vehicleCameraModeOnEntry == VEHICLE_CAMERA_KEEP_PREVIOUS_VIEW then
+        target = previousThirdPersonView
+    end
+    if target == nil then return end
+
+    local viewOk, thirdPerson = pcall(Support.isThirdPerson)
+    if viewOk and thirdPerson ~= target then
+        pcall(Support.setThirdPerson, target)
+    end
 end
 
 Events.OnEnterVehicle.Add(onEnterVehicle)
@@ -847,17 +1001,24 @@ end
 
 local function lazyInteractionHarvest(originalHarvest, player, target)
     diagnoseCharacterHarvestTarget(target)
+    local alife = ViewpointExtendedSupportALife
+    local function harvest()
+        if alife and type(alife.harvest) == "function" then
+            return alife.harvest(originalHarvest, player, target)
+        end
+        return originalHarvest(player, target)
+    end
     if not optionValue(options.lazyInteractionOptions, true)
             or not Support or type(Support.requestInteractionOptions) ~= "function" then
         pendingInteractionTarget = nil
         pendingInteractionTicks = 0
-        return applyInteractionTargetHeading(originalHarvest(player, target), target)
+        return applyInteractionTargetHeading(harvest(), target)
     end
 
     if pendingInteractionTarget == target then
         pendingInteractionTarget = nil
         pendingInteractionTicks = 0
-        return applyInteractionTargetHeading(originalHarvest(player, target), target)
+        return applyInteractionTargetHeading(harvest(), target)
     end
 
     pendingInteractionTarget = nil
@@ -1034,16 +1195,17 @@ local function installCompanionDogsFriendlyNpcFilter()
     diagnosticLog("Companion Dogs ignores Friendly/Allied A-Life NPCs in client threat checks")
 end
 
-local ALIFE_NPC_TAG_LOWERING_TILES = 0.2
-
 local function placeNpcTagAboveAimedNpc(label, target)
     if not target or not Support or type(Support.projectCompanionDogTag) ~= "function" then
         return false
     end
 
+    local layout = ProjectALife and ProjectALife.SpeechBubbleLayout
+    local rise = layout and layout.settings and layout.settings.headRise or 0.66
+    if type(rise) ~= "number" then rise = 0.66 end
     local ok, projected = pcall(function()
         return Support.projectCompanionDogTag(0, target:getX(), target:getY(),
-            target:getZ() - ALIFE_NPC_TAG_LOWERING_TILES)
+            target:getZ() + rise)
     end)
     if not ok or not projected or not projected.size or projected:size() < 2 then return false end
 
@@ -1282,6 +1444,8 @@ end
 
 Events.OnTick.Add(function()
     tickCounter = tickCounter + 1
+    rememberOnFootCamera()
+    maintainVehicleCamera()
     closeExtractionTrackerOnLoad()
     installCursorWindowHooks()
     if pendingInteractionTarget then
@@ -1313,6 +1477,7 @@ Events.OnGameStart.Add(function()
     extractionTrackerClosePending = optionValue(options.closeExtractionTrackerOnLoad, true)
     closeExtractionTrackerOnLoad()
     syncConfiguration()
+    rememberOnFootCamera()
     installCursorWindowHooks()
     installVanillaInventoryCursorIntegration()
     installErgonomicUIIntegration()

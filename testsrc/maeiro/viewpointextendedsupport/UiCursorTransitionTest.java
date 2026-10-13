@@ -5,7 +5,6 @@ import org.lwjglx.opengl.Display;
 import viewpoint.FP;
 import viewpoint.core.View;
 import viewpoint.input.Look;
-import viewpoint.input.ThirdPerson;
 import zombie.input.GameKeyboard;
 import zombie.input.Mouse;
 import zombie.iso.IsoCamera;
@@ -73,7 +72,7 @@ public final class UiCursorTransitionTest {
         check(GLFW.cursorPositionCalls == 3, "already free cursor needs one explicit centering");
 
         Bridge.setAutoCursorRequested(false);
-        ThirdPerson.active = true;
+        View.thirdPerson = true;
         IsoCamera.Character player = (IsoCamera.Character) IsoCamera.character;
         player.vehicle = new Object();
         Display.width = 1281;

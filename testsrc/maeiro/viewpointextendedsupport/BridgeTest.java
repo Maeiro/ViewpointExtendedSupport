@@ -4,7 +4,6 @@ import viewpoint.Compat;
 import viewpoint.FP;
 import viewpoint.core.View;
 import viewpoint.input.Look;
-import viewpoint.input.ThirdPerson;
 import viewpoint.interact.InteractActions;
 import me.zed_0xff.zombie_buddy.Patch;
 import zombie.input.GameKeyboard;
@@ -19,8 +18,14 @@ public final class BridgeTest {
         check(inventoryWheelPatch != null && "mouse".equals(inventoryWheelPatch.methodName()),
                 "inventory scroll protection must hook the current LootMenu mouse handler");
         View.enabled = true;
-        ThirdPerson.active = true;
+        View.thirdPerson = true;
         FP.cursorMode = false;
+
+        check(Bridge.isThirdPerson(), "Viewpoint third-person state must be detected");
+        Bridge.setThirdPerson(false);
+        check(!View.thirdPerson, "third-person mode must be disabled through Viewpoint's current state field");
+        Bridge.setThirdPerson(true);
+        check(View.thirdPerson, "third-person mode must be enabled through Viewpoint's current state field");
 
         configure(true, 56, true, true, true, true, 0);
         check(!Bridge.shouldSkipInteractionMenu(), "Viewpoint interaction menu must remain visible when suppression is inactive");

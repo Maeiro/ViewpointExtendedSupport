@@ -1553,11 +1553,11 @@ public final class Bridge {
     }
 
     public static boolean isThirdPerson() {
-        return getBoolean(thirdPersonActive, "viewpoint.input.ThirdPerson", "active");
+        return getBoolean(resolveThirdPersonField(), "viewpoint.core.View", "thirdPerson");
     }
 
     public static void setThirdPerson(boolean enabled) {
-        setBoolean(thirdPersonActive, "viewpoint.input.ThirdPerson", "active", enabled);
+        setBoolean(resolveThirdPersonField(), "viewpoint.core.View", "thirdPerson", enabled);
     }
 
     public static void setViewEnabled(boolean enabled) {
@@ -2130,7 +2130,7 @@ public final class Bridge {
                 field = field(className, fieldName);
                 if (fieldName.equals("enabled") && className.equals("viewpoint.core.View")) {
                     viewEnabled = field;
-                } else if (fieldName.equals("active") && className.equals("viewpoint.input.ThirdPerson")) {
+                } else if (isThirdPersonField(className, fieldName)) {
                     thirdPersonActive = field;
                 } else if (fieldName.equals("cursorMode")) {
                     cursorMode = field;
@@ -2149,7 +2149,7 @@ public final class Bridge {
             field.setBoolean(null, value);
             if (fieldName.equals("enabled") && className.equals("viewpoint.core.View")) {
                 viewEnabled = field;
-            } else if (fieldName.equals("active") && className.equals("viewpoint.input.ThirdPerson")) {
+            } else if (isThirdPersonField(className, fieldName)) {
                 thirdPersonActive = field;
             } else if (fieldName.equals("cursorMode")) {
                 cursorMode = field;
@@ -2158,6 +2158,25 @@ public final class Bridge {
             }
         } catch (Throwable ignored) {
         }
+    }
+
+    private static Field resolveThirdPersonField() {
+        Field field = thirdPersonActive;
+        if (field == null) {
+            field = field("viewpoint.core.View", "thirdPerson");
+            if (field == null) {
+                field = field("viewpoint.input.ThirdPerson", "active");
+            }
+            if (field != null) {
+                thirdPersonActive = field;
+            }
+        }
+        return field;
+    }
+
+    private static boolean isThirdPersonField(String className, String fieldName) {
+        return (className.equals("viewpoint.core.View") && fieldName.equals("thirdPerson"))
+                || (className.equals("viewpoint.input.ThirdPerson") && fieldName.equals("active"));
     }
 
     private static void setFloat(Field cached, String className, String fieldName, float value) {
