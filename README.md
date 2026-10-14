@@ -2,7 +2,7 @@
 
 Optional compatibility bridge for Viewpoint on Project Zomboid Build 42.
 
-Current version: 0.4.44.
+Current version: 0.4.45.
 
 The mod uses ZombieBuddy's ByteBuddy runtime patching API and does not modify the Viewpoint JAR. It adds vehicle camera switching, optional cascading Viewpoint interaction menus, Simple Context Menu Icons integration, hold-to-use free mouse mode, UI cursor activation, Ergonomic UI integration, and cursor/reticle visibility that follows the actual free-cursor state. Hold-to-use free mouse mode is enabled by default on Mouse Button 4; its configurable bind can use Shift, Ctrl, Alt, or combinations. Hold-to-use free mouse mode leaves Viewpoint's middle-mouse cursor toggle intact. Firearm aiming, targeting, and projectile visuals are left entirely to Viewpoint.
 

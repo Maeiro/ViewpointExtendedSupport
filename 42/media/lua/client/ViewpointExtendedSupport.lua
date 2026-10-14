@@ -602,26 +602,52 @@ end
 
 local nilActionArgument = {}
 
-local function actionIndexNode(index, fn, args, create)
-    if fn == nil or type(args) ~= "table" then return nil end
-    local node = index[fn]
-    if not node then
-        if not create then return nil end
-        node = {}
-        index[fn] = node
+local function actionIndexChild(node, key, identityKeys, create)
+    local keyType = type(key)
+    if keyType ~= "string" and keyType ~= "number" and keyType ~= "boolean" then
+        local identity
+        for index, candidate in ipairs(identityKeys) do
+            if rawequal(candidate, key) then
+                identity = index
+                break
+            end
+        end
+        if identity == nil then
+            if not create then return nil end
+            identityKeys[#identityKeys + 1] = key
+            identity = #identityKeys
+        end
+        key = identity
+        keyType = "identity:" .. keyType
     end
+
+    local typedNode = node[keyType]
+    if not typedNode then
+        if not create then return nil end
+        typedNode = {}
+        node[keyType] = typedNode
+    end
+
+    local child = typedNode[key]
+    if not child then
+        if not create then return nil end
+        child = {}
+        typedNode[key] = child
+    end
+    return child
+end
+
+local function actionIndexNode(index, fn, args, create, identityKeys)
+    if fn == nil or type(args) ~= "table" then return nil end
+    local node = actionIndexChild(index, fn, identityKeys, create)
+    if not node then return nil end
 
     for argument = 1, 11 do
         local key = args[argument]
         if type(key) == "number" and key ~= key then return nil end
         if key == nil then key = nilActionArgument end
-        local child = node[key]
-        if not child then
-            if not create then return nil end
-            child = {}
-            node[key] = child
-        end
-        node = child
+        node = actionIndexChild(node, key, identityKeys, create)
+        if not node then return nil end
     end
     return node
 end
@@ -645,10 +671,12 @@ local function publishVanillaMenuIcons(captured)
 
     local actions = ViewpointInteract and ViewpointInteract.actions or {}
     local iconIndex = {}
+    local identityKeys = {}
     for _, entry in ipairs(captured) do
         local option = entry.option
         if not option.subOption then
-            local node = actionIndexNode(iconIndex, option.onSelect, optionArguments(option), true)
+            local node = actionIndexNode(iconIndex, option.onSelect, optionArguments(option), true,
+                identityKeys)
             if node then
                 node.entries = node.entries or {}
                 table.insert(node.entries, entry)
@@ -657,7 +685,7 @@ local function publishVanillaMenuIcons(captured)
     end
 
     for _, action in ipairs(actions) do
-        local node = actionIndexNode(iconIndex, action.fn, action.args, false)
+        local node = actionIndexNode(iconIndex, action.fn, action.args, false, identityKeys)
         if node and node.entries then
             local nextEntry = node.nextEntry or 1
             local entry = node.entries[nextEntry]
@@ -673,6 +701,7 @@ local interactionMenuDiagnosticStates = {}
 local lastCharacterHarvestTarget
 local lastAimedALifeNpc
 local alifeNpcTagMenuFallbackLogged = false
+local vanillaMenuIconFailureLogged = false
 local lastALifeHarvestDiagnostic
 local lastALifeHarvestDiagnosticAt = 0
 
@@ -923,9 +952,18 @@ local function installViewpointVanillaMenuIconsIntegration()
         end
 
         if ok and result and type(result.labels) == "table" then
-            publishVanillaMenuIcons(captured)
+            local iconsOk, iconError = pcall(publishVanillaMenuIcons, captured)
+            if not iconsOk then
+                if Support and Support.clearVanillaContextMenuIcons then
+                    pcall(Support.clearVanillaContextMenuIcons)
+                end
+                if not vanillaMenuIconFailureLogged then
+                    diagnosticLog("vanilla interaction icon mapping failed: " .. tostring(iconError))
+                    vanillaMenuIconFailureLogged = true
+                end
+            end
         elseif Support and Support.clearVanillaContextMenuIcons then
-            Support.clearVanillaContextMenuIcons()
+            pcall(Support.clearVanillaContextMenuIcons)
         end
         if not ok then error(result, 0) end
         return result
