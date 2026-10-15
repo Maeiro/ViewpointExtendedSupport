@@ -79,6 +79,14 @@ public final class Patches {
         }
     }
 
+    @Patch(className = "viewpoint.render.WorldRenderer", methodName = "drawOutlines", warmUp = true)
+    public static class ViewpointTargetOutline {
+        @Patch.OnEnter(skipOn = true)
+        public static boolean enter() {
+            return Bridge.shouldSkipTargetOutline();
+        }
+    }
+
     @Patch(className = "viewpoint.platform.Onboarding", methodName = "show", warmUp = true)
     public static class ViewpointSetupWizard {
         @Patch.OnEnter(skipOn = true)

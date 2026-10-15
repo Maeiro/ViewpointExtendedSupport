@@ -8,7 +8,7 @@ The mod uses ZombieBuddy's ByteBuddy runtime patching API and does not modify th
 
 When cascading interaction menus are enabled, grouped actions open a nested list with a `< Back` entry; final actions still run through Viewpoint's original handlers. The setting is enabled by default and can be changed in the mod options.
 
-The Viewpoint interaction menu is hidden while the vanilla or Ergonomic UI inventory is open. Collapsing an inventory restores access to interaction options and releases cursor ownership from a collapsed Ergonomic UI panel. This behavior is enabled by default and can be changed in the mod options.
+While the vanilla or Ergonomic UI inventory is open, Viewpoint's interaction menu is hidden and the inventory takes priority for mouse-wheel scrolling. Disable `Hide Viewpoint menu and reserve scroll for inventory` in the mod options to keep the Viewpoint menu and its scrolling available while the inventory is open. Collapsing an inventory restores access to interaction options and releases cursor ownership from a collapsed Ergonomic UI panel. The setting is enabled by default.
 
 Automatic UI cursor support centers the mouse once when an inventory or supported menu opens. It stays free while the interface remains open; reopening the interface centers it again without restoring old cursor positions.
 
@@ -17,6 +17,8 @@ When Wolf Extraction Quest is installed, its Extraction Tracker starts closed wh
 By default, Viewpoint shows a single `View options` row when you look at an interactable object. It only builds the full interaction menu after that row is selected, reducing the work done while scanning nearby objects. This behavior can be disabled in the mod options.
 
 Nearby Viewpoint interaction targets can be cycled with the Left and Right arrow keys or Alt+mouse wheel by default. The scroll modifier and arrow keys can be changed in the mod options.
+
+The Viewpoint target outline can be disabled in the mod options. It remains enabled by default.
 
 Container contents are collapsed into a separate submenu for each container by default, keeping long inventories out of the main interaction list. This behavior can be disabled in the mod options.
 

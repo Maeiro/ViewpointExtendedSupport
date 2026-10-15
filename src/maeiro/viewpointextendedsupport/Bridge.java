@@ -48,6 +48,7 @@ public final class Bridge {
     private static volatile boolean debugLogging;
     private static volatile boolean groupContextMenuActionsEnabled = true;
     private static volatile boolean containerContentsCascadeEnabled = true;
+    private static volatile boolean targetOutlineDisabled;
     private static volatile boolean skipSetupWizard;
     private static volatile boolean autoCursorRequested;
     private static volatile boolean inventoryOpen;
@@ -523,6 +524,14 @@ public final class Bridge {
 
     public static void setInventoryOpen(boolean open) {
         inventoryOpen = open;
+    }
+
+    public static void setTargetOutlineDisabled(boolean disabled) {
+        targetOutlineDisabled = disabled;
+    }
+
+    public static boolean shouldSkipTargetOutline() {
+        return targetOutlineDisabled;
     }
 
     public static boolean shouldSkipInteractionMenu() {

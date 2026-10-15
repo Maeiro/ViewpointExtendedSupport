@@ -220,12 +220,24 @@ public final class BridgeTest {
         check(Patches.InventoryWheel.enter(), "the wheel hook must skip Viewpoint's hidden menu handler");
         check(Bridge.shouldSkipInteractionWheel(), "an open inventory must reserve the wheel from Viewpoint");
         Bridge.setInteractionMenuSuppressed(false);
-        check(Bridge.shouldSkipInteractionWheel(),
-                "an open inventory must reserve the mouse wheel even when menu hiding is disabled");
-        check(Patches.InventoryWheel.enter(), "inventory mode must bypass Viewpoint wheel handling");
         Bridge.setInventoryOpen(false);
+        check(!Bridge.shouldSkipInteractionWheel(),
+                "disabling inventory priority must allow Viewpoint wheel handling while the inventory remains open");
+        check(!Patches.InventoryWheel.enter(), "the disabled setting must not bypass Viewpoint wheel handling");
+        Bridge.setInventoryOpen(true);
+        Bridge.setInteractionMenuSuppressed(true);
+        check(Bridge.shouldSkipInteractionWheel(), "re-enabling the default setting must reserve the wheel again");
+        Bridge.setInventoryOpen(false);
+        Bridge.setInteractionMenuSuppressed(false);
         check(!Bridge.shouldSkipInteractionWheel(), "closing inventory must restore Viewpoint wheel handling");
         check(!Patches.InventoryWheel.enter(), "closing inventory must restore Viewpoint wheel handling");
+
+        Bridge.setTargetOutlineDisabled(false);
+        check(!Patches.ViewpointTargetOutline.enter(), "the target outline must remain enabled by default");
+        Bridge.setTargetOutlineDisabled(true);
+        check(Patches.ViewpointTargetOutline.enter(), "the option must suppress Viewpoint target outlines");
+        Bridge.setTargetOutlineDisabled(false);
+        check(!Patches.ViewpointTargetOutline.enter(), "disabling the option must restore target outlines");
 
         configure(true, 56, true, true, false, true, 0);
         check(!Bridge.shouldSkipSetupWizard(), "setup screen option can keep the wizard enabled");

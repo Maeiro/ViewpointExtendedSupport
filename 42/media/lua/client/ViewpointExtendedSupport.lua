@@ -32,7 +32,7 @@ if PZAPI and PZAPI.ModOptions then
     options.cursorModifier = addModifierOption(modOptions, "FreeCursorModifier", "Free mouse modifiers", 1)
     options.autoUi = modOptions:addTickBox("AutoFreeCursorInUI", "Automatically use free mouse in inventories and menus", true)
     options.ergonomicUi = modOptions:addTickBox("ErgonomicUIIntegration", "Integrate with Ergonomic UI", true)
-    options.hideInteractionMenuWhenInventoryOpen = modOptions:addTickBox("HideInteractionMenuWhenInventoryOpen", "Hide Viewpoint interaction menu while inventory is open", true)
+    options.hideInteractionMenuWhenInventoryOpen = modOptions:addTickBox("HideInteractionMenuWhenInventoryOpen", "Hide Viewpoint menu and reserve scroll for inventory", true)
 
     modOptions:addTitle("Vehicle Camera")
     options.vehicleCameraMode = modOptions:addComboBox("VehicleCameraMode", "Vehicle camera mode")
@@ -44,6 +44,7 @@ if PZAPI and PZAPI.ModOptions then
     options.groupContextMenuActions = modOptions:addTickBox("GroupContextMenuActions", "Use cascading Viewpoint interaction menus", true)
     options.cascadeContainerContents = modOptions:addTickBox("CascadeContainerContents", "Show container contents in a submenu", true)
     options.lazyInteractionOptions = modOptions:addTickBox("LazyInteractionOptions", "Show View options before building interaction menus", true)
+    options.disableTargetOutline = modOptions:addTickBox("DisableTargetOutline", "Disable Viewpoint target outline", false)
     options.interactionPreviousKey = modOptions:addKeyBind("InteractionPreviousKey", "Previous nearby interaction target", DEFAULT_PREVIOUS_INTERACTION_KEY)
     options.interactionNextKey = modOptions:addKeyBind("InteractionNextKey", "Next nearby interaction target", DEFAULT_NEXT_INTERACTION_KEY)
     options.interactionCycleScrollModifier = addModifierOption(modOptions, "InteractionCycleScrollModifier", "Cycle nearby targets with scroll modifier", 4)
@@ -100,6 +101,9 @@ local function syncConfiguration()
     end
     if Support.configureContainerContentsCascade then
         Support.configureContainerContentsCascade(optionValue(options.cascadeContainerContents, true))
+    end
+    if Support.setTargetOutlineDisabled then
+        Support.setTargetOutlineDisabled(optionValue(options.disableTargetOutline, false))
     end
 end
 
@@ -215,13 +219,14 @@ local function updateInteractionMenuSuppression()
     local inventoryOpen = visibleInventory(getPlayerInventory)
         or visibleInventory(getPlayerLoot)
         or visibleErgonomicInventory()
+    local hideInteractionMenu = optionValue(options.hideInteractionMenuWhenInventoryOpen, true)
     if Support.setInventoryOpen then
-        Support.setInventoryOpen(inventoryOpen)
+        Support.setInventoryOpen(hideInteractionMenu and inventoryOpen)
     end
     if Support.setInteractionMenuSuppressed then
         Support.setInteractionMenuSuppressed(
             isALifeConversationOpen()
-                or (optionValue(options.hideInteractionMenuWhenInventoryOpen, true) and inventoryOpen)
+                or (hideInteractionMenu and inventoryOpen)
         )
     end
 end
