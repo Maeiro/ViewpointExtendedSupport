@@ -90,9 +90,14 @@ public final class Patches {
     @Patch(className = "viewpoint.render.LookImage", methodName = "read", warmUp = true)
     public static class OneBitMaskImages {
         @Patch.OnEnter(skipOn = true)
-        @Patch.RuntimeType
-        public static Object enter(@Patch.Argument(0) java.nio.file.Path path) {
-            return MaskPngCompatibility.decodeOneBitMask(path);
+        public static boolean enter(@Patch.Argument(0) java.nio.file.Path path,
+                                    @Patch.Return(readOnly = false) viewpoint.render.LookImage result) {
+            Object decoded = MaskPngCompatibility.decodeOneBitMask(path);
+            if (!(decoded instanceof viewpoint.render.LookImage image)) {
+                return false;
+            }
+            result = image;
+            return true;
         }
     }
 
