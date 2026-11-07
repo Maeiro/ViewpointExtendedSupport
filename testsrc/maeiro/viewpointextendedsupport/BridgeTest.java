@@ -183,27 +183,19 @@ public final class BridgeTest {
 
         IsoCamera.Character player = (IsoCamera.Character) IsoCamera.character;
         player.vehicle = new Object();
-        check(Bridge.isThirdPersonVehicle(), "third-person vehicle state must be detected");
-        check(Bridge.shouldSkipCursorRender(), "third-person vehicle mode must hide the direct cursor renderer");
-        check(Bridge.shouldSkipMouseCursorTexture(), "vehicle camera must hide custom cursor texture");
-        check(!Bridge.overrideMouseCursorVisibility(true), "vehicle camera must hide mouse cursor icons");
-        Bridge.setAutoCursorRequested(true);
-        check(Bridge.overrideMouseCursorVisibility(false),
-                "automatic UI cursor request must show the mouse in the vehicle camera");
-        Bridge.setAutoCursorRequested(false);
-        check(!Bridge.overrideMouseCursorVisibility(true),
-                "vehicle camera must hide mouse again when the UI closes");
-        check(Bridge.shouldSkipVanillaReticle(false), "vehicle camera must hide vanilla reticle");
-        GameKeyboard.down.add(56);
-        Bridge.applyCursorOverride();
-        check(Bridge.shouldSkipVanillaCursor(false), "third-person vehicle mode must hide the vanilla hand cursor");
-        GameKeyboard.down.remove(56);
-        Bridge.applyCursorOverride();
-        check(!Bridge.overrideMouseCursorUpdate(false), "vehicle camera must preserve camera cursor capture");
+        GLFW.mode = 212993;
+        check(!Bridge.shouldSkipVanillaReticle(false),
+                "vehicle camera must preserve Viewpoint's native reticle visibility");
+        check(!Bridge.shouldSkipViewpointReticle(false),
+                "vehicle camera must preserve Viewpoint's native reticle patch result");
+        check(!Bridge.shouldSkipViewpointCrosshair(),
+                "vehicle camera must not suppress Viewpoint's crosshair when the cursor is captured");
+        check(Bridge.overrideMouseCursorVisibility(true),
+                "vehicle camera must preserve Viewpoint's native mouse visibility");
+        check(!Bridge.overrideMouseCursorVisibility(false),
+                "vehicle camera must preserve Viewpoint's native hidden-mouse state");
+        GLFW.mode = 212995;
         player.vehicle = null;
-        GameKeyboard.down.remove(56);
-        Bridge.applyCursorOverride();
-        check(!Bridge.overrideMouseCursorUpdate(false), "leaving vehicle camera must allow normal update");
 
         configure(false, 56, true, true, true, true, 0);
         Bridge.setAutoCursorRequested(true);
@@ -256,7 +248,6 @@ public final class BridgeTest {
         check(FP.resetCount == resetCount, "startup option must not toggle or reset an already-enabled view");
         View.enabled = false;
         check(Bridge.overrideMouseCursorVisibility(true), "vanilla cursor visibility must be preserved outside Viewpoint");
-        ALifeInteractionTargetsTest.run();
 
         System.out.println("ViewpointExtendedSupport BridgeTest: PASS");
     }

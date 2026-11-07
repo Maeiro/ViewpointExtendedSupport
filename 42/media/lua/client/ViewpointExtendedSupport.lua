@@ -23,7 +23,6 @@ local function addModifierOption(modOptions, id, name, selected)
 end
 
 local options = {}
-local conversationCursorOwned = false
 if PZAPI and PZAPI.ModOptions then
     local modOptions = PZAPI.ModOptions:create("ViewpointExtendedSupport", "Viewpoint Extended Support")
     modOptions:addTitle("Cursor and Interface")
@@ -84,9 +83,9 @@ end
 local function syncConfiguration()
     if not Support or not Support.configure then return end
     Support.configure(
-        optionValue(options.holdCursor, true) and not conversationCursorOwned,
+        optionValue(options.holdCursor, true),
         optionValue(options.cursorKey, 1003),
-        optionValue(options.autoUi, true) or conversationCursorOwned,
+        optionValue(options.autoUi, true),
         optionValue(options.diagnostics, false),
         optionValue(options.skipSetup, false),
         optionValue(options.groupContextMenuActions, true),
@@ -112,40 +111,6 @@ local function isVisible(ui)
     local ok, value = pcall(function() return ui:isVisible() end)
     return ok and value == true
 end
-
-local function isALifeConversationOpen()
-    local integration = ViewpointExtendedSupportALife
-    if integration and type(integration.isConversationOpen) == "function" then
-        return integration.isConversationOpen()
-    end
-    local menu = ProjectALife and ProjectALife.TalkMenu
-    local window = menu and menu.instance
-    if not window or not Support or type(Support.isViewEnabled) ~= "function" then return false end
-    local ok, enabled = pcall(Support.isViewEnabled)
-    if not ok or enabled ~= true then return false end
-    if window.playerNum ~= nil and window.playerNum ~= 0 then return false end
-    return isVisible(window)
-end
-
-local function syncConversationCursorMode()
-    local talking = isALifeConversationOpen()
-    if talking == conversationCursorOwned then return false end
-
-    local closed = conversationCursorOwned and not talking
-    if closed and Support and type(Support.setAutoCursorRequested) == "function" then
-        Support.setAutoCursorRequested(false)
-    end
-    conversationCursorOwned = talking
-    syncConfiguration()
-    return closed
-end
-
-local VEHICLE_CURSOR_WINDOWS = {
-    ISRadialMenu = true,
-    ISWorldMap = true,
-    ISMapWrapper = true,
-    ISCharacterInfoWindow = true,
-}
 
 local ON_FOOT_CURSOR_WINDOWS = {
     ISRadialMenu = true,
@@ -225,8 +190,7 @@ local function updateInteractionMenuSuppression()
     end
     if Support.setInteractionMenuSuppressed then
         Support.setInteractionMenuSuppressed(
-            isALifeConversationOpen()
-                or (hideInteractionMenu and inventoryOpen)
+            hideInteractionMenu and inventoryOpen
         )
     end
 end
@@ -236,9 +200,8 @@ local function visibleGameWindow()
         return true
     end
 
-    local allowedClasses = playerIsInVehicle() and VEHICLE_CURSOR_WINDOWS or ON_FOOT_CURSOR_WINDOWS
     for window, className in pairs(activeCursorWindows) do
-        if allowedClasses[className] and isVisible(window) then
+        if ON_FOOT_CURSOR_WINDOWS[className] and isVisible(window) then
             return true
         end
     end
@@ -258,7 +221,7 @@ local function visibleGameWindow()
                 local tableOk, uiTable = pcall(function() return window:getTable() end)
                 if tableOk and uiTable then window = uiTable end
             end
-            if allowedClasses[window.Type] and isVisible(window) then return true end
+            if ON_FOOT_CURSOR_WINDOWS[window.Type] and isVisible(window) then return true end
         end
     end
     return false
@@ -392,12 +355,8 @@ end
 
 updateCursorRequest = function()
     if not Support or not Support.setAutoCursorRequested then return end
-    local conversationClosed = syncConversationCursorMode()
     local hasOtherUi = visibleGameWindow() or ergonomicUiRequestsCursor()
-    local requested = conversationCursorOwned or hasOtherUi
-    if not conversationCursorOwned and not optionValue(options.autoUi, true) then
-        requested = false
-    end
+    local requested = hasOtherUi and optionValue(options.autoUi, true)
 
     if requested then
         cursorRequestAbsentTicks = 0
@@ -411,15 +370,6 @@ updateCursorRequest = function()
         end
     elseif cursorRequestAbsentTicks >= CURSOR_REQUEST_RELEASE_DELAY then
         Support.setAutoCursorRequested(false)
-    end
-
-    if conversationClosed and not hasOtherUi and type(Support.isFreeCursor) == "function"
-            and not Support.isFreeCursor() then
-        local qol = ViewpointQOL
-        if qol and type(qol.lockMouse) == "function" and type(qol.isAvailable) == "function" then
-            local ok, available = pcall(qol.isAvailable)
-            if ok and available then pcall(qol.lockMouse) end
-        end
     end
 end
 
@@ -482,7 +432,12 @@ local function onExitVehicle(player)
 end
 
 local function maintainVehicleCamera()
-    if not vehicleCameraForced or not playerIsInVehicle()
+    if not vehicleCameraForced then return end
+    if vehicleCameraMode() == VEHICLE_CAMERA_OFF then
+        onExitVehicle(nil)
+        return
+    end
+    if not playerIsInVehicle()
             or not Support or type(Support.isViewEnabled) ~= "function"
             or type(Support.isThirdPerson) ~= "function"
             or type(Support.setThirdPerson) ~= "function" then return end
@@ -703,12 +658,7 @@ local function publishVanillaMenuIcons(captured)
 end
 
 local interactionMenuDiagnosticStates = {}
-local lastCharacterHarvestTarget
-local lastAimedALifeNpc
-local alifeNpcTagMenuFallbackLogged = false
 local vanillaMenuIconFailureLogged = false
-local lastALifeHarvestDiagnostic
-local lastALifeHarvestDiagnosticAt = 0
 
 local function diagnosticLog(message)
     if optionValue(options.diagnostics, false) then
@@ -721,101 +671,6 @@ local function logInteractionMenuDiagnostic(key, message)
     if interactionMenuDiagnosticStates[key] == message then return end
     interactionMenuDiagnosticStates[key] = message
     diagnosticLog("interaction menu: " .. message)
-end
-
-local function isProjectALifeNpc(target)
-    if not target then return false end
-
-    local speech = ProjectALife and ProjectALife.Speech
-    if type(speech) == "table" and type(speech.variable) == "function" then
-        local ok, uid = pcall(speech.variable, target, "ALifeUID")
-        if ok and uid ~= nil and uid ~= "" then return true end
-    end
-
-    if type(target.getModData) == "function" then
-        local ok, data = pcall(target.getModData, target)
-        return ok and type(data) == "table" and type(data.ProjectALifeUID) == "string"
-            and data.ProjectALifeUID ~= ""
-    end
-    return false
-end
-
-local function collectContextOptions(menu, options, visited)
-    if not menu or visited[menu] or type(menu.options) ~= "table" then return end
-    visited[menu] = true
-
-    for _, option in ipairs(menu.options) do
-        if type(option) == "table" then
-            options[option] = true
-            if option.subOption and type(menu.getSubMenu) == "function" then
-                local ok, submenu = pcall(function() return menu:getSubMenu(option.subOption) end)
-                if ok then collectContextOptions(submenu, options, visited) end
-            end
-        end
-    end
-end
-
-local function linkNewContextActionsToTarget(menu, target, existingOptions, visited)
-    if not menu or visited[menu] or type(menu.options) ~= "table" then return 0 end
-    visited[menu] = true
-
-    local linked = 0
-    for _, option in ipairs(menu.options) do
-        if type(option) == "table" then
-            if not existingOptions[option] then
-                local lastParameter = 0
-                local alreadyTargetsNpc = option.target == target
-                for index = 1, 10 do
-                    local parameter = option["param" .. index]
-                    if parameter ~= nil then lastParameter = index end
-                    if parameter == target then alreadyTargetsNpc = true end
-                end
-                if option.onSelect and not option.subOption and not alreadyTargetsNpc
-                        and lastParameter < 10 then
-                    option["param" .. (lastParameter + 1)] = target
-                    linked = linked + 1
-                end
-            end
-            if option.subOption and type(menu.getSubMenu) == "function" then
-                local ok, submenu = pcall(function() return menu:getSubMenu(option.subOption) end)
-                if ok then
-                    linked = linked + linkNewContextActionsToTarget(submenu, target,
-                        existingOptions, visited)
-                end
-            end
-        end
-    end
-    return linked
-end
-
-local function diagnoseCharacterHarvestTarget(target)
-    local isCharacter = false
-    if target and type(instanceof) == "function" then
-        local ok, result = pcall(instanceof, target, "IsoGameCharacter")
-        isCharacter = ok and result == true
-    end
-
-    if not isCharacter then
-        lastCharacterHarvestTarget = nil
-        lastAimedALifeNpc = nil
-        return
-    end
-
-    local isALifeNpc = isProjectALifeNpc(target)
-    lastAimedALifeNpc = isALifeNpc and target or nil
-    if target == lastCharacterHarvestTarget then return end
-
-    lastCharacterHarvestTarget = target
-    logInteractionMenuDiagnostic("target", "Viewpoint harvested a character target; Project A-Life NPC="
-        .. tostring(isALifeNpc))
-end
-
-local function logALifeHarvestResult(message)
-    local now = type(getTimestampMs) == "function" and getTimestampMs() or 0
-    if message == lastALifeHarvestDiagnostic and now - lastALifeHarvestDiagnosticAt < 3000 then return end
-    lastALifeHarvestDiagnostic = message
-    lastALifeHarvestDiagnosticAt = now
-    diagnosticLog("A-Life interaction harvest: " .. message)
 end
 
 local function installViewpointVanillaMenuIconsIntegration()
@@ -839,84 +694,14 @@ local function installViewpointVanillaMenuIconsIntegration()
     local originalHarvest = interactions.harvest
     local worldMenu = ISWorldObjectContextMenu
     local wrapper = function(...)
-        local player, target = ...
-        local isALifeNpc = isProjectALifeNpc(target)
-        local contextMenuClass = ISContextMenu
-        local originalContextMenuGet = isALifeNpc and type(contextMenuClass) == "table"
-            and contextMenuClass.get or nil
-        local capturedContext
-        local interceptContextMenuGet
-        if type(originalContextMenuGet) == "function" then
-            interceptContextMenuGet = function(...)
-                local menu = originalContextMenuGet(...)
-                if capturedContext == nil then capturedContext = menu end
-                return menu
-            end
-            contextMenuClass.get = interceptContextMenuGet
-        end
-
-        local originalTriggerEvent = isALifeNpc and type(triggerEvent) == "function" and triggerEvent or nil
-        local fillEventTriggered = false
-        local linkedContextActions = 0
-        local interceptTriggerEvent
-        if originalTriggerEvent then
-            interceptTriggerEvent = function(eventName, ...)
-                local args = { ... }
-                local eventContext = eventName == "OnFillWorldObjectContextMenu" and args[2] or nil
-                local isTargetFill = eventContext ~= nil and eventContext == capturedContext
-                local existingOptions
-                if isTargetFill then
-                    existingOptions = {}
-                    collectContextOptions(eventContext, existingOptions, {})
-                end
-                local result = originalTriggerEvent(eventName, ...)
-                if isTargetFill then
-                    fillEventTriggered = true
-                    linkedContextActions = linkedContextActions + linkNewContextActionsToTarget(
-                        eventContext, target, existingOptions, {})
-                end
-                return result
-            end
-            triggerEvent = interceptTriggerEvent
-        end
-
         local captured = {}
         local originalCreateMenu = worldMenu.createMenu
         local menuBuilder = worldMenu._NB_old_createMenu
         if type(menuBuilder) ~= "function" then
             menuBuilder = originalCreateMenu
         end
-        local createMenuCalled = false
-        local fetchCount
-        local recoveredContext = false
-        local filledRecoveredContext = false
         local interceptCreateMenu = function(...)
-            createMenuCalled = true
             local menu = menuBuilder(...)
-            if isALifeNpc and capturedContext ~= nil then
-                local fetch = worldMenu.fetchVars
-                fetchCount = type(fetch) == "table" and tonumber(fetch.c) or nil
-                if not fillEventTriggered and originalTriggerEvent and player
-                        and type(player.getPlayerNum) == "function" then
-                    local ok, playerNum = pcall(player.getPlayerNum, player)
-                    if ok then
-                        local existingOptions = {}
-                        collectContextOptions(capturedContext, existingOptions, {})
-                        local fillOk = pcall(originalTriggerEvent, "OnFillWorldObjectContextMenu", playerNum,
-                            capturedContext, { target }, false)
-                        filledRecoveredContext = fillOk
-                        fillEventTriggered = fillOk
-                        if fillOk then
-                            linkedContextActions = linkedContextActions + linkNewContextActionsToTarget(
-                                capturedContext, target, existingOptions, {})
-                        end
-                    end
-                end
-                if type(menu) ~= "table" then
-                    menu = capturedContext
-                    recoveredContext = true
-                end
-            end
             captureVanillaMenuIcons(menu, captured, {})
             return menu
         end
@@ -925,35 +710,6 @@ local function installViewpointVanillaMenuIconsIntegration()
         local ok, result = pcall(originalHarvest, ...)
         if worldMenu.createMenu == interceptCreateMenu then
             worldMenu.createMenu = originalCreateMenu
-        end
-        if interceptTriggerEvent and triggerEvent == interceptTriggerEvent then
-            triggerEvent = originalTriggerEvent
-        end
-        if interceptContextMenuGet and contextMenuClass.get == interceptContextMenuGet then
-            contextMenuClass.get = originalContextMenuGet
-        end
-
-        if isALifeNpc then
-            local resultSummary
-            if not ok then
-                resultSummary = "harvest failed: " .. tostring(result)
-            elseif type(result) == "table" and type(result.labels) == "table" then
-                local labels = {}
-                for index = 1, math.min(#result.labels, 8) do
-                    labels[index] = tostring(result.labels[index])
-                end
-                resultSummary = "menu labels=" .. tostring(#result.labels)
-                    .. ", seen=" .. tostring(result.seen)
-                    .. ", entries=" .. table.concat(labels, " | ")
-            else
-                resultSummary = "no labels; reason=" .. tostring(type(result) == "table" and result.why or result)
-            end
-            logALifeHarvestResult(resultSummary .. "; createMenu=" .. tostring(createMenuCalled)
-                .. ", fetchCount=" .. tostring(fetchCount)
-                .. ", fillEvent=" .. tostring(fillEventTriggered)
-                .. ", npcActionsLinked=" .. tostring(linkedContextActions)
-                .. ", contextRecovered=" .. tostring(recoveredContext)
-                .. ", recoveredOnFill=" .. tostring(filledRecoveredContext))
         end
 
         if ok and result and type(result.labels) == "table" then
@@ -1043,12 +799,7 @@ local function applyInteractionTargetHeading(result, target)
 end
 
 local function lazyInteractionHarvest(originalHarvest, player, target)
-    diagnoseCharacterHarvestTarget(target)
-    local alife = ViewpointExtendedSupportALife
     local function harvest()
-        if alife and type(alife.harvest) == "function" then
-            return alife.harvest(originalHarvest, player, target)
-        end
         return originalHarvest(player, target)
     end
     if not optionValue(options.lazyInteractionOptions, true)
@@ -1095,6 +846,8 @@ local function lazyInteractionHarvest(originalHarvest, player, target)
     return { title = title, labels = { "View options" }, enabled = { true }, seen = 0 }
 end
 
+local appendNeatLockpickActions
+
 local function installLazyInteractionOptions()
     local interactions = ViewpointInteract
     if type(interactions) ~= "table" then return end
@@ -1104,7 +857,8 @@ local function installLazyInteractionOptions()
             and interactions._extendedSupportLazyHarvest ~= interactions.harvest then
         local originalHarvest = interactions.harvest
         local wrapper = function(player, object)
-            return lazyInteractionHarvest(originalHarvest, player, object)
+            local result = lazyInteractionHarvest(originalHarvest, player, object)
+            return appendNeatLockpickActions(result, player, object)
         end
         interactions.harvest = wrapper
         interactions._extendedSupportLazyHarvest = wrapper
@@ -1125,259 +879,132 @@ local function installLazyInteractionOptions()
     end
 end
 
-local function viewpointAimHudActive()
-    if not Support or type(Support.isViewEnabled) ~= "function" then return false end
-    local ok, enabled = pcall(Support.isViewEnabled)
-    if not ok or enabled ~= true then return false end
-    if type(Support.shouldSkipInteractionMenu) == "function" then
-        local skipOk, skip = pcall(Support.shouldSkipInteractionMenu)
-        if skipOk and skip == true then return false end
-    end
-    return true
-end
+local function neatLockpickDoorOptions(player, door)
+    if not player or not door or type(instanceof) ~= "function" then return nil end
 
-local function aimedALifeNpc()
-    if Support and type(Support.getAimedInteractionObject) == "function" then
-        local ok, target = pcall(Support.getAimedInteractionObject)
-        if ok then
-            if target and isProjectALifeNpc(target) then
-                lastAimedALifeNpc = target
-                return target
-            end
-            lastAimedALifeNpc = nil
-            return nil
-        end
-    end
-
-    if Support and type(Support.getAimedALifeNpc) == "function" then
-        local ok, target = pcall(Support.getAimedALifeNpc)
-        if ok and target then
-            lastAimedALifeNpc = target
-            return target
-        end
-    end
-
-    if lastAimedALifeNpc then
-        if not alifeNpcTagMenuFallbackLogged then
-            diagnosticLog("A-Life NPC tag using the confirmed interaction-menu target")
-            alifeNpcTagMenuFallbackLogged = true
-        end
-        return lastAimedALifeNpc
-    end
-    return nil
-end
-
-local function alifeNpcUid(target)
-    local speech = ProjectALife and ProjectALife.Speech
-    if type(speech) == "table" and type(speech.variable) == "function" then
-        local ok, uid = pcall(speech.variable, target, "ALifeUID")
-        if ok and uid ~= nil and uid ~= "" then return tostring(uid) end
-    end
-    if target and type(target.getModData) == "function" then
-        local ok, data = pcall(target.getModData, target)
-        if ok and type(data) == "table" and data.ProjectALifeUID ~= nil
-                and data.ProjectALifeUID ~= "" then
-            return tostring(data.ProjectALifeUID)
-        end
-    end
-    return nil
-end
-
-local function alifeRecordForCompanionDogs(uid)
-    local alife = ProjectALife
-    if type(alife) ~= "table" then return nil end
-
-    local executor = alife.Executor
-    local records = executor and executor.mirror and executor.mirror.records
-    local record = type(records) == "table" and records[uid] or nil
-    if type(record) == "table" then return record end
-
-    local registry = alife.ActorRegistry
-    local lookup = type(registry) == "table" and (registry.peek or registry.read) or nil
-    if type(lookup) ~= "function" then return nil end
-    local ok, registered = pcall(lookup, uid)
-    return ok and type(registered) == "table" and registered or nil
-end
-
-local function isFriendlyOrAlliedALifeNpcForCompanionDogs(zombie)
-    local uid = alifeNpcUid(zombie)
-    if not uid or type(getSpecificPlayer) ~= "function" then return false end
-
-    local okPlayer, player = pcall(getSpecificPlayer, 0)
-    if not okPlayer or not player then return false end
-
-    local record = alifeRecordForCompanionDogs(uid)
-    local relations = ProjectALife and ProjectALife.Relations
-    if not record or type(relations) ~= "table" or type(relations.playerStance) ~= "function" then
-        return false
-    end
-
-    if type(relations.hostileToPlayer) == "function" then
-        local okHostile, hostile = pcall(relations.hostileToPlayer, record, player)
-        if okHostile and hostile == true then return false end
-    end
-
-    local okStance, stance = pcall(relations.playerStance, record, player)
-    if not okStance then return false end
-    stance = string.lower(tostring(stance or ""))
-    return stance == "friendly" or stance == "allied"
-end
-
-local function installCompanionDogsFriendlyNpcFilter()
-    local dogs = CompanionDogs
-    if type(dogs) ~= "table" or type(dogs.isFriendlyNPC) ~= "function" then return end
-    if dogs._viewpointSupportALifeFriendlyNPC == dogs.isFriendlyNPC then return end
-
-    local original = dogs.isFriendlyNPC
-    local wrapper = function(zombie, ...)
-        if isFriendlyOrAlliedALifeNpcForCompanionDogs(zombie) then return true end
-        return original(zombie, ...)
-    end
-    dogs.isFriendlyNPC = wrapper
-    dogs._viewpointSupportALifeFriendlyNPC = wrapper
-    diagnosticLog("Companion Dogs ignores Friendly/Allied A-Life NPCs in client threat checks")
-end
-
-local function placeNpcTagAboveAimedNpc(label, target)
-    if not target or not Support or type(Support.projectCompanionDogTag) ~= "function" then
-        return false
-    end
-
-    local layout = ProjectALife and ProjectALife.SpeechBubbleLayout
-    local rise = layout and layout.settings and layout.settings.headRise or 0.66
-    if type(rise) ~= "number" then rise = 0.66 end
-    local ok, projected = pcall(function()
-        return Support.projectCompanionDogTag(0, target:getX(), target:getY(),
-            target:getZ() + rise)
+    local isDoor = false
+    pcall(function()
+        isDoor = instanceof(door, "IsoDoor")
+            or (instanceof(door, "IsoThumpable") and door.isDoor and door:isDoor())
     end)
-    if not ok or not projected or not projected.size or projected:size() < 2 then return false end
+    if not isDoor then return nil end
 
-    local okPosition, screenX, screenY = pcall(function()
-        return projected:get(0) - getPlayerScreenLeft(0),
-            projected:get(1) - getPlayerScreenTop(0)
+    local sandbox = NeatLockpick_SandboxOptions
+    local chances = NeatLockpick_Chances
+    local unlock = NeatLockpick_Unlock
+    local manager = NeatLockpickingManager
+    if type(sandbox) ~= "table" or type(sandbox.isEnabled) ~= "function"
+            or type(chances) ~= "table" or type(chances.canLockpick) ~= "function"
+            or type(unlock) ~= "table" or type(manager) ~= "table" then return nil end
+
+    local okEnabled, enabled = pcall(sandbox.isEnabled)
+    if not okEnabled or enabled ~= true then return nil end
+
+    local locked = false
+    pcall(function()
+        locked = (door.isLockedByKey and door:isLockedByKey())
+            or (door.isLocked and door:isLocked()) or false
     end)
-    if not okPosition then return false end
+    if not locked then return nil end
 
-    label:setX(screenX - label.width / 2)
-    label:setY(screenY - label.height - 4)
-    return true
+    local inventory = player:getInventory()
+    local hasLockpick = false
+    if inventory and type(inventory.containsTypeRecurse) == "function" then
+        local okLockpick, hasRegular = pcall(inventory.containsTypeRecurse, inventory,
+            "NeatLockpicking.Lockpick")
+        local okHandmade, hasHandmade = pcall(inventory.containsTypeRecurse, inventory,
+            "NeatLockpicking.HandmadeLockpick")
+        hasLockpick = (okLockpick and hasRegular == true) or (okHandmade and hasHandmade == true)
+    end
+
+    local canPick = false
+    if hasLockpick then
+        local okCanPick, allowed = pcall(chances.canLockpick, player)
+        canPick = okCanPick and allowed == true
+    end
+
+    local hasCrowbar = false
+    if type(unlock.playerHasCrowbar) == "function" then
+        local okCrowbar, found = pcall(unlock.playerHasCrowbar, player)
+        hasCrowbar = okCrowbar and found == true
+    end
+
+    if not canPick and not hasCrowbar then return nil end
+
+    local crowbarEnabled = true
+    if hasCrowbar and type(unlock.isTooExhaustedToCrowbar) == "function" then
+        local okExhaustion, exhausted = pcall(unlock.isTooExhaustedToCrowbar, player)
+        if okExhaustion then crowbarEnabled = exhausted ~= true end
+    end
+
+    return {
+        canPick = canPick and type(manager.createBuildingDoor) == "function",
+        canCrowbar = hasCrowbar and type(manager.createCrowbarDoor) == "function",
+        crowbarEnabled = crowbarEnabled,
+        manager = manager,
+    }
 end
 
-local alifeNpcTagIntegrationLogged = false
-local alifeNpcTagWaitingLogged = false
-local alifeNpcTagLabelLogged = false
-local alifeNpcTagTargetLogged = false
-local alifeNpcTagNoAimLogged = false
-local alifeNpcTagUidFailureLogged = false
-local alifeNpcTagDataFailureLogged = false
-local alifeNpcTagProjectionLogged = false
+local function interactionLabelExists(labels, optionLabel)
+    for _, label in ipairs(labels) do
+        if type(label) == "string" and label:find(optionLabel, 1, true) then return true end
+    end
+    return false
+end
 
-local function installALifeNpcTagIntegration()
-    local npcTags = ProjectALifeJimmy and ProjectALifeJimmy.NpcTags
-    if type(npcTags) ~= "table" or type(npcTags.hovered) ~= "function"
-            or type(npcTags.extraLines) ~= "function" then
-        if not alifeNpcTagWaitingLogged then
-            diagnosticLog("A-Life NPC tag integration is waiting for ProjectALifeJimmy.NpcTags")
-            alifeNpcTagWaitingLogged = true
+appendNeatLockpickActions = function(result, player, door)
+    local options = neatLockpickDoorOptions(player, door)
+    if not options then return result end
+
+    result = type(result) == "table" and result or {}
+    result.labels = type(result.labels) == "table" and result.labels or {}
+    result.enabled = type(result.enabled) == "table" and result.enabled or {}
+    result.deliberate = type(result.deliberate) == "table" and result.deliberate or {}
+    result.tips = type(result.tips) == "table" and result.tips or {}
+    result.title = result.title or interactionTargetHeading(door)
+
+    local actions = ViewpointInteract.actions
+    if type(actions) ~= "table" then
+        actions = {}
+        ViewpointInteract.actions = actions
+    end
+
+    local group = getText("ContextMenu_NeatLockpicking_Door")
+    local candidates = {}
+    if options.canPick then
+        candidates[#candidates + 1] = {
+            name = getText("ContextMenu_NeatLockpicking_Picklock"),
+            enabled = true,
+            fn = function() options.manager.createBuildingDoor(player, door, nil) end,
+        }
+    end
+    if options.canCrowbar then
+        candidates[#candidates + 1] = {
+            name = getText("ContextMenu_NeatLockpicking_Crowbar"),
+            enabled = options.crowbarEnabled,
+            fn = function() options.manager.createCrowbarDoor(player, door) end,
+        }
+    end
+
+    for _, candidate in ipairs(candidates) do
+        if not interactionLabelExists(result.labels, candidate.name) then
+            local label = group and group ~= "" and (group .. ": " .. candidate.name) or candidate.name
+            local index = math.max(#result.labels, #actions) + 1
+            result.labels[index] = label
+            result.enabled[index] = candidate.enabled
+            result.deliberate[index] = false
+            result.tips[index] = nil
+            actions[index] = {
+                name = label,
+                fn = candidate.fn,
+                args = {},
+                n = 0,
+                enabled = candidate.enabled,
+            }
         end
-        return
     end
 
-    if npcTags._viewpointSupportHovered ~= npcTags.hovered then
-        local originalHovered = npcTags.hovered
-        local wrapper = function(playerNum, player)
-            npcTags._viewpointSupportAimedTarget = nil
-            if not viewpointAimHudActive() then return originalHovered(playerNum, player) end
-            local target = aimedALifeNpc()
-            if not target and not alifeNpcTagNoAimLogged then
-                diagnosticLog("A-Life NPC tag has no Viewpoint aimed NPC target")
-                alifeNpcTagNoAimLogged = true
-            end
-            local uid = target and alifeNpcUid(target) or nil
-            if not uid then
-                if target and not alifeNpcTagUidFailureLogged then
-                    diagnosticLog("A-Life NPC tag target has no A-Life UID")
-                    alifeNpcTagUidFailureLogged = true
-                end
-                return nil
-            end
-            if not alifeNpcTagTargetLogged then
-                diagnosticLog("A-Life NPC tag resolved an aimed NPC")
-                alifeNpcTagTargetLogged = true
-            end
-            npcTags._viewpointSupportAimedTarget = target
-            return { uid = uid, shell = target }, 0, 0, 1
-        end
-        npcTags.hovered = wrapper
-        npcTags._viewpointSupportHovered = wrapper
-    end
-
-    if npcTags._viewpointSupportExtraLines ~= npcTags.extraLines then
-        local originalExtraLines = npcTags.extraLines
-        local wrapper = function(...)
-            local lines = originalExtraLines(...)
-            if not viewpointAimHudActive() then return lines end
-
-            local withoutSpots
-            for index, line in ipairs(lines) do
-                if type(line) == "table" and line.spot ~= nil then
-                    if not withoutSpots then
-                        withoutSpots = {}
-                        for previous = 1, index - 1 do
-                            withoutSpots[previous] = lines[previous]
-                        end
-                    end
-                    local copy = {}
-                    for key, value in pairs(line) do
-                        if key ~= "spot" then copy[key] = value end
-                    end
-                    withoutSpots[index] = copy
-                elseif withoutSpots then
-                    withoutSpots[index] = line
-                end
-            end
-            return withoutSpots or lines
-        end
-        npcTags.extraLines = wrapper
-        npcTags._viewpointSupportExtraLines = wrapper
-    end
-    if not alifeNpcTagIntegrationLogged then
-        diagnosticLog("A-Life NPC tag hover integration installed")
-        alifeNpcTagIntegrationLogged = true
-    end
-
-    local label = npcTags.label
-    if label and type(label.prerender) == "function"
-            and label._viewpointSupportPrerender ~= label.prerender then
-        local originalPrerender = label.prerender
-        local wrapper = function(self, ...)
-            local result = originalPrerender(self, ...)
-            if viewpointAimHudActive() then
-                local target = npcTags._viewpointSupportAimedTarget
-                if target and not self.show then
-                    if not alifeNpcTagDataFailureLogged then
-                        diagnosticLog("A-Life NPC tag target found, but its tag data produced no label")
-                        alifeNpcTagDataFailureLogged = true
-                    end
-                elseif self.show then
-                    local projected = placeNpcTagAboveAimedNpc(self, target)
-                    if not projected then self.show = nil end
-                    if not alifeNpcTagProjectionLogged then
-                        diagnosticLog("A-Life NPC tag head projection "
-                            .. (projected and "succeeded" or "failed"))
-                        alifeNpcTagProjectionLogged = true
-                    end
-                end
-            end
-            return result
-        end
-        label.prerender = wrapper
-        label._viewpointSupportPrerender = wrapper
-    end
-    if label and type(label.prerender) == "function" and not alifeNpcTagLabelLogged then
-        diagnosticLog("A-Life NPC tag label hook installed")
-        alifeNpcTagLabelLogged = true
-    end
+    return result
 end
 
 local COMPANION_DOG_TAG_HEAD_OFFSET = 55
@@ -1503,13 +1130,11 @@ Events.OnTick.Add(function()
     end
     if tickCounter % 10 == 0 then
         syncConfiguration()
-        installCompanionDogsFriendlyNpcFilter()
         installVanillaInventoryCursorIntegration()
         installErgonomicUIIntegration()
         installContextMenuIconsIntegration()
         installViewpointVanillaMenuIconsIntegration()
         installLazyInteractionOptions()
-        installALifeNpcTagIntegration()
         installCompanionDogTagProjection()
     end
     updateInteractionMenuSuppression()
@@ -1527,8 +1152,6 @@ Events.OnGameStart.Add(function()
     installContextMenuIconsIntegration()
     installViewpointVanillaMenuIconsIntegration()
     installLazyInteractionOptions()
-    installALifeNpcTagIntegration()
-    installCompanionDogsFriendlyNpcFilter()
     installCompanionDogTagProjection()
     if optionValue(options.startViewpoint, false) and Support and Support.enableViewpoint then
         Support.enableViewpoint()

@@ -149,15 +149,6 @@ public final class Patches {
         }
     }
 
-    @Patch(className = "viewpoint.interact.LootTargets", methodName = "people", warmUp = true)
-    public static class ALifeInteractionTargets {
-        @Patch.OnExit
-        public static void exit(@Patch.Argument(0) Object player,
-                                @Patch.Argument(1) Object square) {
-            Bridge.addALifeInteractionTargets(player, square);
-        }
-    }
-
     @Patch(className = "viewpoint.interact.LootTargets", methodName = "aimed", warmUp = true)
     public static class InteractionTargetCycling {
         @Patch.OnExit
