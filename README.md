@@ -30,6 +30,8 @@ Vehicle camera behavior is a single selection: disabled, force third person in t
 
 When Companion Dogs is installed, its companion name tags are positioned using Viewpoint's camera projection. This optional integration does not change the dog's threat detection.
 
+One-bit PNG clothing masks are decoded through Java's standard image reader, preserving compatibility with clothing mods that ship masks the Viewpoint decoder cannot read.
+
 Dependencies:
 
 - ZombieBuddy 2.3.0 or newer

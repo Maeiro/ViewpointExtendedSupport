@@ -6,6 +6,31 @@
 	"previewfile"		"D:\\SteamCMD\\workshop\\ViewpointExtendedSupport\\preview.gif"
 	"visibility"		"0"
 	"title"		"Viewpoint Extended Support"
-	"description"		"[h1]Viewpoint Extended Support[/h1]\nQuality-of-life, control, and compatibility improvements for Project Viewpoint in Project Zomboid Build 42.20+.\n\n[h2]Camera and mouse controls[/h2]\n[h3]Vehicle camera[/h3]\n[list][*]Choose a vehicle camera mode: force third person while driving and return to first person on exit, preserve the previous perspective in and out of the vehicle, or disable camera switching.[*]Project Viewpoint controls mouse and reticle visibility while driving.[*]Optionally start Viewpoint automatically or skip its setup screen; both are disabled by default.[/list]\n[h3]Mouse control[/h3]\n[list][*]Hold Mouse Button 4 to release the mouse for free cursor movement; configure the key and Shift, Ctrl, or Alt modifiers.[*]Automatically release and center the cursor when opening supported menus and inventories, keep it free while they remain open, and center it again when reopened.[*]Preserves Viewpoint’s native middle-mouse cursor toggle.[/list]\n[h2]Inventory improvements[/h2]\n[list][*]Supports vanilla and Ergonomic UI inventories.[*]Prioritizes inventory mouse-wheel scrolling and can hide the Viewpoint interaction menu while an inventory is open; both behaviors are enabled by default.[*]Keeps mouse look and interaction available when inventory panels are collapsed.[/list]\n[h2]Interaction improvements[/h2]\n[list][*]Shows the current target in the interaction heading, such as [i]Interact with Ground[/i].[*]Cycle nearby targets with Left/Right arrows or Alt + Mouse Wheel; binds and modifiers are configurable.[*]Optional cascading interaction menus, container contents, and deferred [i]View options[/i] loading.[*]Preserves vanilla interaction icons and optionally integrates with Simple Context Menu Icons.[*]Optionally disables Viewpoint’s yellow target outline; enabled by default.[/list]\n[h2]Neat Lockpicking compatibility[/h2]\nWhen Neat Lockpicking is installed, its PickLock and crowbar actions appear directly in Viewpoint’s interaction list for eligible locked doors. Neat’s normal tool, skill, and fatigue requirements apply. Neat Lockpicking is optional.\n\n[h2]Other integrations[/h2]\n[list][*]Companion Dogs: camera-aware companion name tags.[*]Wolf Extraction Quest: optionally starts the Extraction Tracker closed when loading a save.[/list]\n\n[h2]Latest update[/h2]\n[list][*]Removed Project A-Life-specific integrations; Companion Dogs camera-aware name tags remain available.[*]Delegated vehicle mouse and reticle visibility to Project Viewpoint.[*]Added Neat Lockpicking door actions to Viewpoint’s targeted interactions.[/list]\n\n[h2]Configuration and requirements[/h2]\nConfigure features and key binds in categorized in-game Mod Options. Diagnostic logging, automatic Viewpoint startup, and setup-screen skipping are disabled by default. Requires Project Viewpoint, ZombieBuddy 2.3.0 or newer, and Project Zomboid Build 42.20+. Other integrations are optional and only needed for their respective features.\n\nWorkshop ID: 3812978679\nMod ID: ViewpointExtendedSupport"
-	"changenote"		"0.4.51: Remove A-Life integrations, delegate vehicle mouse visibility to Viewpoint, and add Neat Lockpicking door actions."
+	"description"		"[h1]Viewpoint Extended Support[/h1]
+Quality-of-life, control, and compatibility improvements for Project Viewpoint in Project Zomboid Build 42.20+.
+
+[h2]Camera and mouse controls[/h2]
+[h3]Vehicle camera[/h3]
+[list][*]Choose a vehicle camera mode: force third person while driving and return to first person on exit, preserve the previous perspective in and out of the vehicle, or disable camera switching.[*]Project Viewpoint controls mouse and reticle visibility while driving.[*]Optionally start Viewpoint automatically or skip its setup screen; both are disabled by default.[/list]
+[h3]Mouse control[/h3]
+[list][*]Hold Mouse Button 4 to release the mouse for free cursor movement; configure the key and Shift, Ctrl, or Alt modifiers.[*]Automatically release and center the cursor when opening supported menus and inventories, keep it free while they remain open, and center it again when reopened.[*]Preserves Viewpoint’s native middle-mouse cursor toggle.[/list]
+[h2]Inventory improvements[/h2]
+[list][*]Supports vanilla and Ergonomic UI inventories.[*]Prioritizes inventory mouse-wheel scrolling and can hide the Viewpoint interaction menu while an inventory is open; both behaviors are enabled by default.[*]Keeps mouse look and interaction available when inventory panels are collapsed.[/list]
+[h2]Interaction improvements[/h2]
+[list][*]Shows the current target in the interaction heading, such as [i]Interact with Ground[/i].[*]Cycle nearby targets with Left/Right arrows or Alt + Mouse Wheel; binds and modifiers are configurable.[*]Optional cascading interaction menus, container contents, and deferred [i]View options[/i] loading.[*]Preserves vanilla interaction icons and optionally integrates with Simple Context Menu Icons.[*]Optionally disables Viewpoint’s yellow target outline; enabled by default.[/list]
+[h2]Neat Lockpicking compatibility[/h2]
+When Neat Lockpicking is installed, its PickLock and crowbar actions appear directly in Viewpoint’s interaction list for eligible locked doors. Neat’s normal tool, skill, and fatigue requirements apply. Neat Lockpicking is optional.
+
+[h2]Other integrations[/h2]
+[list][*]Companion Dogs: camera-aware companion name tags.[*]Wolf Extraction Quest: optionally starts the Extraction Tracker closed when loading a save.[*]Supports one-bit PNG clothing masks used by clothing mods such as Spongie Clothing.[/list]
+
+[h2]Latest update[/h2]
+[list][*]Added compatibility for one-bit PNG clothing masks that Viewpoint's decoder cannot read directly.[*]Removed Project A-Life-specific integrations; Companion Dogs camera-aware name tags remain available.[*]Delegated vehicle mouse and reticle visibility to Project Viewpoint.[*]Added Neat Lockpicking door actions to Viewpoint's targeted interactions.[/list]
+
+[h2]Configuration and requirements[/h2]
+Configure features and key binds in categorized in-game Mod Options. Diagnostic logging, automatic Viewpoint startup, and setup-screen skipping are disabled by default. Requires Project Viewpoint, ZombieBuddy 2.3.0 or newer, and Project Zomboid Build 42.20+. Other integrations are optional and only needed for their respective features.
+
+Workshop ID: 3812978679
+Mod ID: ViewpointExtendedSupport"
+		"changenote"		"Support one-bit clothing masks and fix Workshop description line breaks."
 }

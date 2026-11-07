@@ -87,6 +87,15 @@ public final class Patches {
         }
     }
 
+    @Patch(className = "viewpoint.render.LookImage", methodName = "read", warmUp = true)
+    public static class OneBitMaskImages {
+        @Patch.OnEnter(skipOn = true)
+        @Patch.RuntimeType
+        public static Object enter(@Patch.Argument(0) java.nio.file.Path path) {
+            return MaskPngCompatibility.decodeOneBitMask(path);
+        }
+    }
+
     @Patch(className = "viewpoint.platform.Onboarding", methodName = "show", warmUp = true)
     public static class ViewpointSetupWizard {
         @Patch.OnEnter(skipOn = true)
