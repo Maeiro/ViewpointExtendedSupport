@@ -25,12 +25,12 @@ When Neat Lockpicking is installed, its PickLock and crowbar actions appear dire
 [list][*]Companion Dogs: camera-aware companion name tags.[*]Wolf Extraction Quest: optionally starts the Extraction Tracker closed when loading a save.[*]Supports one-bit PNG clothing masks used by clothing mods such as Spongie Clothing.[/list]
 
 [h2]Latest update[/h2]
-[list][*]Added compatibility for one-bit PNG clothing masks that Viewpoint's decoder cannot read directly.[*]Removed Project A-Life-specific integrations; Companion Dogs camera-aware name tags remain available.[*]Delegated vehicle mouse and reticle visibility to Project Viewpoint.[*]Added Neat Lockpicking door actions to Viewpoint's targeted interactions.[/list]
+[list][*]Fixed access to the one-bit PNG clothing mask compatibility helper.[*]Added compatibility for one-bit PNG clothing masks that Viewpoint's decoder cannot read directly.[*]Removed Project A-Life-specific integrations; Companion Dogs camera-aware name tags remain available.[*]Delegated vehicle mouse and reticle visibility to Project Viewpoint.[*]Added Neat Lockpicking door actions to Viewpoint's targeted interactions.[/list]
 
 [h2]Configuration and requirements[/h2]
 Configure features and key binds in categorized in-game Mod Options. Diagnostic logging, automatic Viewpoint startup, and setup-screen skipping are disabled by default. Requires Project Viewpoint, ZombieBuddy 2.3.0 or newer, and Project Zomboid Build 42.20+. Other integrations are optional and only needed for their respective features.
 
 Workshop ID: 3812978679
 Mod ID: ViewpointExtendedSupport"
-		"changenote"		"Support one-bit clothing masks and fix Workshop description line breaks."
+		"changenote"		"Fix helper access for one-bit clothing masks."
 }
