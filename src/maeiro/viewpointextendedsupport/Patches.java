@@ -91,13 +91,21 @@ public final class Patches {
     public static class OneBitMaskImages {
         @Patch.OnEnter(skipOn = true)
         public static boolean enter(@Patch.Argument(0) java.nio.file.Path path,
-                                    @Patch.Return(readOnly = false) viewpoint.render.LookImage result) {
+                                    @Patch.Local("decodedMask") viewpoint.render.LookImage decodedMask) {
             Object decoded = MaskPngCompatibility.decodeOneBitMask(path);
             if (!(decoded instanceof viewpoint.render.LookImage image)) {
                 return false;
             }
-            result = image;
+            decodedMask = image;
             return true;
+        }
+
+        @Patch.OnExit
+        public static void exit(@Patch.Local("decodedMask") viewpoint.render.LookImage decodedMask,
+                                @Patch.Return(readOnly = false) viewpoint.render.LookImage result) {
+            if (decodedMask != null) {
+                result = decodedMask;
+            }
         }
     }
 
