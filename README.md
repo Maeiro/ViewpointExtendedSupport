@@ -2,13 +2,15 @@
 
 Optional compatibility bridge for Viewpoint on Project Zomboid Build 42.
 
-Current version: 0.4.55.
+Current version: 0.4.56.
 
 The mod uses ZombieBuddy's ByteBuddy runtime patching API and does not modify the Viewpoint JAR. It adds vehicle camera switching, optional cascading Viewpoint interaction menus, Simple Context Menu Icons integration, hold-to-use free mouse mode, UI cursor activation, Ergonomic UI integration, and cursor/reticle visibility that follows the actual free-cursor state. Viewpoint controls mouse and reticle visibility while driving. Hold-to-use free mouse mode is enabled by default on Mouse Button 4; its configurable bind can use Shift, Ctrl, Alt, or combinations. Hold-to-use free mouse mode leaves Viewpoint's middle-mouse cursor toggle intact. Firearm aiming, targeting, and projectile visuals are left entirely to Viewpoint.
 
 When cascading interaction menus are enabled, grouped actions open a nested list with a `< Back` entry; final actions still run through Viewpoint's original handlers. The setting is enabled by default and can be changed in the mod options.
 
 While the vanilla or Ergonomic UI inventory is open, Viewpoint's interaction menu is hidden and the inventory takes priority for mouse-wheel scrolling. Disable `Hide Viewpoint menu and reserve scroll for inventory` in the mod options to keep the Viewpoint menu and its scrolling available while the inventory is open. Collapsing an inventory restores access to interaction options and releases cursor ownership from a collapsed Ergonomic UI panel. The setting is enabled by default.
+
+When ProjectRPGExpanded is installed, its player HUD, portrait, battery panel and level badge hide while the Viewpoint UI inventory screen is open. The HUD returns according to the PDA's own visibility settings when closed. `Hide PDA player HUD in Viewpoint inventory` is enabled by default in Mod Options. This integration does not require Extraction Mode.
 
 Automatic UI cursor support centers the mouse once when an inventory or supported menu opens. It stays free while the interface remains open; reopening the interface centers it again without restoring old cursor positions.
 

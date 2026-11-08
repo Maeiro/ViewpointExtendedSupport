@@ -1,0 +1,4 @@
+{
+  "UI_ViewpointExtendedSupport_HidePlayerHud": "Hide PDA player HUD in Viewpoint inventory",
+  "UI_ViewpointExtendedSupport_HidePlayerHudTooltip": "Temporarily hide the ProjectRPGExpanded player HUD, portrait and level badge while Viewpoint UI inventory is open. Restore the HUD when the inventory closes. Enabled by default."
+}

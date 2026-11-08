@@ -1,4 +1,5 @@
 require "PZAPI/ModOptions"
+local PlayerHudVisibility = require "ViewpointExtendedSupport/PlayerHudVisibility"
 
 local Support = ViewpointExtendedSupport
 local DEFAULT_PREVIOUS_INTERACTION_KEY = (Keyboard and Keyboard.KEY_LEFT) or 203
@@ -32,6 +33,9 @@ if PZAPI and PZAPI.ModOptions then
     options.autoUi = modOptions:addTickBox("AutoFreeCursorInUI", "Automatically use free mouse in inventories and menus", true)
     options.ergonomicUi = modOptions:addTickBox("ErgonomicUIIntegration", "Integrate with Ergonomic UI", true)
     options.hideInteractionMenuWhenInventoryOpen = modOptions:addTickBox("HideInteractionMenuWhenInventoryOpen", "Hide Viewpoint menu and reserve scroll for inventory", true)
+
+    options.hidePlayerHud = modOptions:addTickBox("HidePDAPlayerHudInViewpointInventory",
+        "UI_ViewpointExtendedSupport_HidePlayerHud", true, "UI_ViewpointExtendedSupport_HidePlayerHudTooltip")
 
     modOptions:addTitle("Vehicle Camera")
     options.vehicleCameraMode = modOptions:addComboBox("VehicleCameraMode", "Vehicle camera mode")
@@ -1129,6 +1133,7 @@ Events.OnTick.Add(function()
         Support.diagnosticTick()
     end
     if tickCounter % 10 == 0 then
+        PlayerHudVisibility.install(options.hidePlayerHud)
         syncConfiguration()
         installVanillaInventoryCursorIntegration()
         installErgonomicUIIntegration()
@@ -1142,6 +1147,7 @@ Events.OnTick.Add(function()
 end)
 
 Events.OnGameStart.Add(function()
+    PlayerHudVisibility.install(options.hidePlayerHud)
     extractionTrackerClosePending = optionValue(options.closeExtractionTrackerOnLoad, true)
     closeExtractionTrackerOnLoad()
     syncConfiguration()

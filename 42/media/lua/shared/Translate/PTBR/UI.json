@@ -1,0 +1,4 @@
+{
+  "UI_ViewpointExtendedSupport_HidePlayerHud": "Ocultar HUD do jogador do PDA no inventário Viewpoint",
+  "UI_ViewpointExtendedSupport_HidePlayerHudTooltip": "Oculta temporariamente o HUD do jogador do ProjectRPGExpanded, retrato e emblema de nível enquanto o inventário Viewpoint UI estiver aberto. Restaura o HUD ao fechar o inventário. Ativado por padrão."
+}
