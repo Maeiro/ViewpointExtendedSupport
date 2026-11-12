@@ -6,6 +6,14 @@ public final class Patches {
     private Patches() {
     }
 
+    @Patch(className = "viewpoint.models.ModelCapture", methodName = "capture", warmUp = true)
+    public static class IncompleteCharacterModels {
+        @Patch.OnEnter(skipOn = true)
+        public static boolean enter(@Patch.AllArguments Object[] arguments) {
+            return ModelCaptureGuard.shouldSkip(arguments);
+        }
+    }
+
     @Patch(className = "viewpoint.interact.LootMenu", methodName = "mouse", warmUp = true)
     public static class InventoryWheel {
         @Patch.OnEnter(skipOn = true)

@@ -2,7 +2,7 @@
 {
 	"appid"		"108600"
 	"publishedfileid"		"3812978679"
-	"contentfolder"		"D:\\SteamCMD\\workshop\\ViewpointExtendedSupport\\content"
+	"contentfolder"		"C:/PZMods/ViewpointExtendedSupport/build/steam-release-0.4.57/content"
 	"previewfile"		"D:\\SteamCMD\\workshop\\ViewpointExtendedSupport\\preview.gif"
 	"visibility"		"0"
 	"title"		"Viewpoint Extended Support"
@@ -26,12 +26,12 @@ When ProjectRPGExpanded is installed, its player HUD hides while Viewpoint UI in
 [list][*]Companion Dogs: camera-aware companion name tags.[*]Wolf Extraction Quest: optionally starts the Extraction Tracker closed when loading a save.[*]Supports one-bit PNG clothing masks used by clothing mods such as Spongie Clothing.[/list]
 
 [h2]Latest update[/h2]
-[list][*]Fixed the one-bit PNG clothing mask hook so Viewpoint receives the decoded image.[*]Added compatibility for one-bit PNG clothing masks that Viewpoint's decoder cannot read directly.[*]Removed Project A-Life-specific integrations; Companion Dogs camera-aware name tags remain available.[*]Delegated vehicle mouse and reticle visibility to Project Viewpoint.[*]Added Neat Lockpicking door actions to Viewpoint's targeted interactions.[/list]
+[list][*]Defers character scene capture when a static model transform is not ready, avoiding a null matrix in Viewpoint's scene builder.[*]Fixed the one-bit PNG clothing mask hook so Viewpoint receives the decoded image.[*]Added compatibility for one-bit PNG clothing masks that Viewpoint's decoder cannot read directly.[*]Removed Project A-Life-specific integrations; Companion Dogs camera-aware name tags remain available.[*]Delegated vehicle mouse and reticle visibility to Project Viewpoint.[*]Added Neat Lockpicking door actions to Viewpoint's targeted interactions.[/list]
 
 [h2]Configuration and requirements[/h2]
 Configure features and key binds in categorized in-game Mod Options. Diagnostic logging, automatic Viewpoint startup, and setup-screen skipping are disabled by default. Requires Project Viewpoint, ZombieBuddy 2.3.0 or newer, and Project Zomboid Build 42.20+. Other integrations are optional and only needed for their respective features.
 
 Workshop ID: 3812978679
 Mod ID: ViewpointExtendedSupport"
-		"changenote" "0.4.56: Adds enabled-by-default PDA player HUD hiding while Viewpoint UI inventory is open. Migrated from Viewpoint Extraction Support; ProjectRPGExpanded remains optional."
+		"changenote" "0.4.57: Defers character scene capture while static model transforms are unavailable, preventing null transforms from reaching Viewpoint's scene builder."
 }

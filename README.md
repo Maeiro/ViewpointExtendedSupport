@@ -2,7 +2,7 @@
 
 Optional compatibility bridge for Viewpoint on Project Zomboid Build 42.
 
-Current version: 0.4.56.
+Current version: 0.4.57.
 
 The mod uses ZombieBuddy's ByteBuddy runtime patching API and does not modify the Viewpoint JAR. It adds vehicle camera switching, optional cascading Viewpoint interaction menus, Simple Context Menu Icons integration, hold-to-use free mouse mode, UI cursor activation, Ergonomic UI integration, and cursor/reticle visibility that follows the actual free-cursor state. Viewpoint controls mouse and reticle visibility while driving. Hold-to-use free mouse mode is enabled by default on Mouse Button 4; its configurable bind can use Shift, Ctrl, Alt, or combinations. Hold-to-use free mouse mode leaves Viewpoint's middle-mouse cursor toggle intact. Firearm aiming, targeting, and projectile visuals are left entirely to Viewpoint.
 
@@ -33,6 +33,8 @@ Vehicle camera behavior is a single selection: disabled, force third person in t
 When Companion Dogs is installed, its companion name tags are positioned using Viewpoint's camera projection. This optional integration does not change the dog's threat detection.
 
 One-bit PNG clothing masks are decoded through Java's standard image reader, preserving compatibility with clothing mods that ship masks the Viewpoint decoder cannot read.
+
+Character scene capture is deferred for a frame when a static model's placement transform is not ready. The capture is retried automatically on later frames, preventing a missing transform from reaching Viewpoint's scene builder as a null matrix.
 
 Dependencies:
 
